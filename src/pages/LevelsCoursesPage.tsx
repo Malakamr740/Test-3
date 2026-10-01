@@ -5,6 +5,7 @@ import { z } from 'zod'
 import AdminLayout from '../components/AdminLayout'
 import { supabase } from '../lib/supabaseClient'
 import { questionBankService } from '../lib/questionBankService'
+import { useUnsavedChanges } from '../contexts/UnsavedChangesContext'
 
 // Validation Schemas
 const levelFormSchema = z
@@ -79,6 +80,7 @@ export default function LevelsCoursesPage() {
   const [courseDescription, setCourseDescription] = useState('')
   const [courseRegUrl, setCourseRegUrl] = useState('')
   const [courseWhatsappUrl, setCourseWhatsappUrl] = useState('')
+  const [courseBaseline, setCourseBaseline] = useState({ name: '', description: '', registrationUrl: '', whatsappUrl: '' })
   const [savingCourse, setSavingCourse] = useState(false)
   const [courseError, setCourseError] = useState<string | null>(null)
 
@@ -88,7 +90,8 @@ export default function LevelsCoursesPage() {
     reset,
     setValue,
     watch,
-    formState: { errors },
+    getValues,
+    formState: { errors, isDirty: isLevelFormDirty },
   } = useForm<LevelFormData>({
     resolver: zodResolver(levelFormSchema) as any,
     defaultValues: {
@@ -102,6 +105,28 @@ export default function LevelsCoursesPage() {
   })
 
   const selectedCategoryIds = watch('category_ids') || []
+  const courseDraftDirty = Boolean(
+    showCourseModal &&
+      (courseName !== courseBaseline.name ||
+        courseDescription !== courseBaseline.description ||
+        courseRegUrl !== courseBaseline.registrationUrl ||
+        courseWhatsappUrl !== courseBaseline.whatsappUrl)
+  )
+
+  const savePendingChanges = async () => {
+    if (isLevelModalOpen && isLevelFormDirty) {
+      const parsed = levelFormSchema.safeParse(getValues())
+      if (!parsed.success) throw new Error(parsed.error.issues[0]?.message || 'Check the level fields.')
+      if (!(await onSubmitLevel(parsed.data))) throw new Error('The level could not be saved.')
+    } else if (courseDraftDirty && !(await persistCourse())) {
+      throw new Error(courseError || 'The course could not be saved.')
+    }
+  }
+
+  const markClean = useUnsavedChanges(
+    (isLevelModalOpen && isLevelFormDirty) || courseDraftDirty,
+    savePendingChanges
+  )
 
   function addToast(type: 'success' | 'error', text: string) {
     const id = Math.random().toString(36).substring(2, 9)
@@ -292,10 +317,10 @@ export default function LevelsCoursesPage() {
   }
 
   // Save Level (Create or Edit) with Zod validation
-  async function onSubmitLevel(formData: LevelFormData) {
+  async function onSubmitLevel(formData: LevelFormData): Promise<boolean> {
     if (!orgId) {
       addToast('error', 'Organization could not be determined.')
-      return
+      return false
     }
 
     setIsSubmittingLevel(true)
@@ -399,9 +424,12 @@ export default function LevelsCoursesPage() {
       }
 
       setIsLevelModalOpen(false)
+      markClean()
+      return true
     } catch (err: any) {
       console.error('Save level error:', err)
       addToast('error', err?.message || 'Error saving performance tier.')
+      return false
     } finally {
       setIsSubmittingLevel(false)
     }
@@ -549,6 +577,7 @@ export default function LevelsCoursesPage() {
     setCourseDescription('')
     setCourseRegUrl('')
     setCourseWhatsappUrl('')
+    setCourseBaseline({ name: '', description: '', registrationUrl: '', whatsappUrl: '' })
     setCourseError(null)
     setShowCourseModal(true)
   }
@@ -559,19 +588,24 @@ export default function LevelsCoursesPage() {
     setCourseDescription(c.description || '')
     setCourseRegUrl(c.registration_url || '')
     setCourseWhatsappUrl(c.whatsapp_url || '')
+    setCourseBaseline({
+      name: c.name,
+      description: c.description || '',
+      registrationUrl: c.registration_url || '',
+      whatsappUrl: c.whatsapp_url || '',
+    })
     setCourseError(null)
     setShowCourseModal(true)
   }
 
-  async function handleSaveCourse(e: React.FormEvent) {
-    e.preventDefault()
+  async function persistCourse(): Promise<boolean> {
     if (!courseName.trim()) {
       setCourseError('Course name is required.')
-      return
+      return false
     }
     if (!orgId) {
       setCourseError('Organization not resolved.')
-      return
+      return false
     }
 
     setSavingCourse(true)
@@ -607,11 +641,19 @@ export default function LevelsCoursesPage() {
       setShowCourseModal(false)
       fetchData()
       addToast('success', 'Course saved successfully.')
+      markClean()
+      return true
     } catch (err: any) {
       setCourseError(err.message)
+      return false
     } finally {
       setSavingCourse(false)
     }
+  }
+
+  async function handleSaveCourse(e: React.FormEvent) {
+    e.preventDefault()
+    await persistCourse()
   }
 
   async function deleteCourse(courseId: string) {

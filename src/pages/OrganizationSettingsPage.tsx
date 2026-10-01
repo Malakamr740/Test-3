@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import AdminLayout from '../components/AdminLayout'
 import DynamicRegistrationField from '../components/DynamicRegistrationField'
+import { useUnsavedChanges } from '../contexts/UnsavedChangesContext'
 import { supabase } from '../lib/supabaseClient'
 import {
   ArrowUp,
@@ -118,6 +119,7 @@ export default function OrganizationSettingsPage() {
   const [websiteUrl, setWebsiteUrl] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
   // Add / Edit Field Modal State
   const [modalMode, setModalMode] = useState<'create' | 'edit' | null>(null)
@@ -232,19 +234,19 @@ export default function OrganizationSettingsPage() {
     setFieldError(null)
   }
 
-  async function handleSaveField(e: React.FormEvent) {
+  async function handleSaveField(e: React.FormEvent): Promise<boolean> {
     e.preventDefault()
     setFieldError(null)
 
     if (!fieldLabel.trim()) {
       setFieldError('Field label is required.')
-      return
+      return false
     }
 
     const cleanKey = slugify(fieldKey || fieldLabel)
     if (!cleanKey) {
       setFieldError('Field key must contain letters or numbers.')
-      return
+      return false
     }
 
     let parsedOptions: string[] | null = null
@@ -255,7 +257,7 @@ export default function OrganizationSettingsPage() {
         .filter(Boolean)
       if (parsedOptions.length === 0) {
         setFieldError('Please provide at least one option for dropdown/radio/checkbox fields.')
-        return
+        return false
       }
     }
 
@@ -267,7 +269,7 @@ export default function OrganizationSettingsPage() {
       if (fields.some((f) => f.field_key === cleanKey)) {
         setFieldError(`A field with key "${cleanKey}" already exists. Choose a different label or key.`)
         setSavingField(false)
-        return
+        return false
       }
 
       const newField: RegistrationField = {
@@ -332,6 +334,14 @@ export default function OrganizationSettingsPage() {
 
     setSavingField(false)
     setModalMode(null)
+    setHasUnsavedChanges(false)
+    return true
+  }
+
+  function closeFieldEditor() {
+    setModalMode(null)
+    setHasUnsavedChanges(false)
+    setFieldError(null)
   }
 
   // Swap places with Up or Down arrows
@@ -413,9 +423,22 @@ export default function OrganizationSettingsPage() {
     } catch {}
 
     setSavingSettings(false)
+    setHasUnsavedChanges(false)
     setSettingsSavedMessage(true)
     setTimeout(() => setSettingsSavedMessage(false), 2500)
   }
+
+  const savePendingChanges = async () => {
+    const preventDefault = () => {}
+    if (modalMode) {
+      if (!(await handleSaveField({ preventDefault } as React.FormEvent))) {
+        throw new Error('Please fix the registration field before saving.')
+      }
+    } else {
+      await handleSaveBranding({ preventDefault } as React.FormEvent)
+    }
+  }
+  useUnsavedChanges(hasUnsavedChanges, savePendingChanges)
 
   return (
     <AdminLayout
@@ -565,6 +588,7 @@ export default function OrganizationSettingsPage() {
           {/* Branding & Marketing Details Form */}
           <form
             onSubmit={handleSaveBranding}
+            onChangeCapture={() => setHasUnsavedChanges(true)}
             className="bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs space-y-4"
           >
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -698,7 +722,7 @@ export default function OrganizationSettingsPage() {
               </h2>
               <button
                 type="button"
-                onClick={() => setModalMode(null)}
+                onClick={closeFieldEditor}
                 className="text-slate-400 hover:text-slate-600 p-1"
               >
                 ✕
@@ -712,7 +736,11 @@ export default function OrganizationSettingsPage() {
               </div>
             )}
 
-            <form onSubmit={handleSaveField} className="space-y-4">
+            <form
+              onSubmit={handleSaveField}
+              onChangeCapture={() => setHasUnsavedChanges(true)}
+              className="space-y-4"
+            >
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Field Label <span className="text-rose-500">*</span>
@@ -787,7 +815,7 @@ export default function OrganizationSettingsPage() {
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setModalMode(null)}
+                  onClick={closeFieldEditor}
                   className="px-4 py-2 border border-slate-200 text-xs font-semibold text-slate-600 rounded-xl hover:bg-slate-50 transition"
                 >
                   Cancel

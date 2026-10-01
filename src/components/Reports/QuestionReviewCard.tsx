@@ -82,10 +82,12 @@ interface Props {
   index: number
   avgTime?: number
   highlight?: boolean
+  visibleFields?: string[]
 }
 
-export default function QuestionReviewCard({ question, index, avgTime, highlight }: Props) {
+export default function QuestionReviewCard({ question, index, avgTime, highlight, visibleFields }: Props) {
   const [open, setOpen] = useState(false)
+  const showField = (field: string) => !visibleFields || visibleFields.includes(field)
   const questionStatus = classifyQuestionState(question)
   const timeRatio = avgTime && avgTime > 0 ? Math.min(question.time_spent_seconds / avgTime, 2) : 0
   const paceTone =
@@ -102,14 +104,16 @@ export default function QuestionReviewCard({ question, index, avgTime, highlight
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-slate-900">Question {index + 1}</span>
-            <ThreeStateBadge status={questionStatus} />
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium capitalize text-slate-600">
-              {question.difficulty}
-            </span>
+            {showField('status') && <ThreeStateBadge status={questionStatus} />}
+            {showField('difficulty') && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium capitalize text-slate-600">
+                {question.difficulty}
+              </span>
+            )}
           </div>
-          <div className="mt-2 max-w-none text-slate-800">
+          {showField('questionText') && <div className="mt-2 max-w-none text-slate-800">
             <ContentBlockRenderer blocks={question.content_blocks} />
-          </div>
+          </div>}
         </div>
         <span className="mt-1 shrink-0 text-xs font-semibold text-slate-400">
           {open ? 'Hide details ▲' : 'Show details ▼'}
@@ -117,7 +121,7 @@ export default function QuestionReviewCard({ question, index, avgTime, highlight
       </button>
 
       <div className={`space-y-4 border-t border-slate-100 p-5 ${open ? 'block' : 'hidden'} print:block`}>
-        <div>
+        {showField('time') && <div>
           <div className="flex items-center justify-between text-xs text-slate-500">
             <span>
               Time spent:{' '}
@@ -128,16 +132,17 @@ export default function QuestionReviewCard({ question, index, avgTime, highlight
           <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-100">
             <div className={`h-full rounded-full ${paceTone}`} style={{ width: `${Math.min(timeRatio * 50, 100)}%` }} />
           </div>
-        </div>
+        </div>}
 
-        <div className="flex flex-wrap gap-2 text-xs">
+        {showField('taxonomy') && <div className="flex flex-wrap gap-2 text-xs">
           {question.category_name && <Tag label="Category" value={question.category_name} />}
           {question.lesson_name && <Tag label="Lesson" value={question.lesson_name} />}
           {question.skill_name && <Tag label="Skill" value={question.skill_name} />}
-        </div>
+        </div>}
 
+        {(showField('studentResponse') || showField('expectedSolution')) && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className={`rounded-xl border p-3.5 ${
+          {showField('studentResponse') && <div className={`rounded-xl border p-3.5 ${
             questionStatus === 'unanswered'
               ? 'border-slate-200 bg-slate-50/70'
               : questionStatus === 'correct'
@@ -150,17 +155,18 @@ export default function QuestionReviewCard({ question, index, avgTime, highlight
             <div className="mt-1.5 text-sm text-slate-800">
               {formatAnswer(question.student_answer, question.choices, questionStatus)}
             </div>
-          </div>
+          </div>}
 
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3.5">
+          {showField('expectedSolution') && <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3.5">
             <div className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
               Expected Solution
             </div>
             <div className="mt-1.5 text-sm text-slate-800">{formatCorrect(question)}</div>
-          </div>
+          </div>}
         </div>
+        )}
 
-        {question.explanation_blocks?.length > 0 && (
+        {showField('explanation') && question.explanation_blocks?.length > 0 && (
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
             <div className="text-xs font-semibold uppercase tracking-wider text-slate-600">
               Step-by-Step Diagnostic Explanation

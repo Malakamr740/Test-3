@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import AdminLayout from '../components/AdminLayout'
 import ShareAssessmentModal from '../components/ShareAssessmentModal'
+import { useUnsavedChanges } from '../contexts/UnsavedChangesContext'
 import ContentBlockRenderer from '../components/ContentBlockRenderer'
 import {
   assessmentService,
@@ -39,6 +40,7 @@ import {
   GraduationCap,
   Sparkles,
   Coffee,
+  Award,
   HelpCircle,
 } from 'lucide-react'
 
@@ -56,6 +58,13 @@ export const AssessmentDetailPage: React.FC = () => {
   const [sectionTitle, setSectionTitle] = useState('')
   const [sectionDesc, setSectionDesc] = useState('')
   const [sectionSettings, setSectionSettings] = useState<SectionSettings>({ ...defaultSectionSettings })
+  const sectionSettingsDirty = Boolean(
+    editingSection &&
+    (sectionTitle !== editingSection.title ||
+      sectionDesc !== (editingSection.description || '') ||
+      JSON.stringify(sectionSettings) !== JSON.stringify(editingSection.settings))
+  )
+  const markSectionSettingsClean = useUnsavedChanges(sectionSettingsDirty, persistSectionSettings)
 
   // Question Bank Picker Modal
   const [pickerSectionId, setPickerSectionId] = useState<string | null>(null)
@@ -210,19 +219,24 @@ export const AssessmentDetailPage: React.FC = () => {
     setSectionSettings({ ...sec.settings })
   }
 
-  const handleSaveSectionSettings = (e: React.FormEvent) => {
-    e.preventDefault()
+  function persistSectionSettings() {
     if (!assessment || !editingSection) return
 
+    const updated = assessmentService.updateSection(assessment.id, editingSection.id, {
+      title: sectionTitle.trim() || editingSection.title,
+      description: sectionDesc.trim(),
+      settings: sectionSettings,
+    })
+    setAssessment(updated)
+    setEditingSection(null)
+    showNotification('Section settings saved!')
+  }
+
+  const handleSaveSectionSettings = (e: React.FormEvent) => {
+    e.preventDefault()
     try {
-      const updated = assessmentService.updateSection(assessment.id, editingSection.id, {
-        title: sectionTitle.trim() || editingSection.title,
-        description: sectionDesc.trim(),
-        settings: sectionSettings,
-      })
-      setAssessment(updated)
-      setEditingSection(null)
-      showNotification('Section settings saved!')
+      persistSectionSettings()
+      markSectionSettingsClean()
     } catch (err: any) {
       setErrorMessage(err.message)
     }

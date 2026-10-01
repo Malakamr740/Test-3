@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import AdminLayout from '../components/AdminLayout'
 import type {
   SurveyQuestion,
@@ -6,6 +6,7 @@ import type {
   ActionPlanMilestone,
 } from '../lib/surveyService'
 import { surveyService } from '../lib/surveyService'
+import { useUnsavedChanges } from '../contexts/UnsavedChangesContext'
 import {
   Sparkles,
   Plus,
@@ -33,16 +34,33 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
   const [questions, setQuestions] = useState<SurveyQuestion[]>(() => surveyService.getQuestions())
   const [actionPlans, setActionPlans] = useState<ActionPlan[]>(() => surveyService.getActionPlans())
 
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      surveyService.loadQuestionsFromDatabase(),
+      surveyService.loadActionPlansFromDatabase(),
+    ]).then(([savedQuestions, savedPlans]) => {
+      if (!active) return
+      setQuestions(savedQuestions)
+      setActionPlans(savedPlans)
+    }).catch((error) => console.error('Failed to load survey configuration:', error))
+    return () => {
+      active = false
+    }
+  }, [])
+
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
 
   // Editing Question Modal State
   const [editingQuestion, setEditingQuestion] = useState<SurveyQuestion | null>(null)
+  const [questionBaseline, setQuestionBaseline] = useState<SurveyQuestion | null>(null)
   const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false)
 
   // Editing Plan Modal State
   const [editingPlan, setEditingPlan] = useState<ActionPlan | null>(null)
+  const [planBaseline, setPlanBaseline] = useState<ActionPlan | null>(null)
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false)
 
   // Live Student Experience Preview State
@@ -76,7 +94,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
   }, [questions, actionPlans])
 
   // Handlers for Questions
-  const handleSaveQuestion = (q: SurveyQuestion) => {
+  const handleSaveQuestion = async (q: SurveyQuestion): Promise<boolean> => {
     let updated: SurveyQuestion[]
     if (questions.some((item) => item.id === q.id)) {
       updated = questions.map((item) => (item.id === q.id ? q : item))
@@ -84,9 +102,16 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
       updated = [...questions, { ...q, order_index: questions.length }]
     }
     setQuestions(updated)
-    surveyService.saveQuestions(updated)
+    try {
+      await surveyService.saveQuestions(updated)
+    } catch (error) {
+      alert(`Failed to save survey questions: ${String(error)}`)
+      return false
+    }
     setIsQuestionModalOpen(false)
     setEditingQuestion(null)
+    setQuestionBaseline(null)
+    return true
   }
 
   const handleDeleteQuestion = (id: string) => {
@@ -98,7 +123,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
     })
   }
 
-  const handleMoveQuestion = (index: number, direction: 'up' | 'down') => {
+  const handleMoveQuestion = async (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1
     if (targetIndex < 0 || targetIndex >= questions.length) return
     const newQuestions = [...questions]
@@ -107,7 +132,11 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
     newQuestions[targetIndex] = temp
     const reindexed = newQuestions.map((q, idx) => ({ ...q, order_index: idx }))
     setQuestions(reindexed)
-    surveyService.saveQuestions(reindexed)
+    try {
+      await surveyService.saveQuestions(reindexed)
+    } catch (error) {
+      alert(`Failed to save survey question order: ${String(error)}`)
+    }
   }
 
   const handleResetQuestions = () => {
@@ -118,7 +147,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
   }
 
   // Handlers for Action Plans
-  const handleSavePlan = (plan: ActionPlan) => {
+  const handleSavePlan = async (plan: ActionPlan): Promise<boolean> => {
     let updated: ActionPlan[]
     if (actionPlans.some((p) => p.id === plan.id)) {
       updated = actionPlans.map((p) => (p.id === plan.id ? plan : p))
@@ -128,9 +157,16 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
     // Sort plans by min_score ascending
     updated.sort((a, b) => (a.min_score ?? 0) - (b.min_score ?? 0))
     setActionPlans(updated)
-    surveyService.saveActionPlans(updated)
+    try {
+      await surveyService.saveActionPlans(updated)
+    } catch (error) {
+      alert(`Failed to save action plans: ${String(error)}`)
+      return false
+    }
     setIsPlanModalOpen(false)
     setEditingPlan(null)
+    setPlanBaseline(null)
+    return true
   }
 
   const handleDeletePlan = (id: string) => {
@@ -149,7 +185,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
     })
   }
 
-  const handleExecuteDelete = () => {
+  const handleExecuteDelete = async () => {
     if (!deleteTarget) return
 
     if (deleteTarget.type === 'question' && deleteTarget.id) {
@@ -157,16 +193,16 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
         .filter((q) => q.id !== deleteTarget.id)
         .map((q, idx) => ({ ...q, order_index: idx }))
       setQuestions(updated)
-      surveyService.saveQuestions(updated)
+      await surveyService.saveQuestions(updated)
     } else if (deleteTarget.type === 'plan' && deleteTarget.id) {
       const updated = actionPlans.filter((p) => p.id !== deleteTarget.id)
       setActionPlans(updated)
-      surveyService.saveActionPlans(updated)
+      await surveyService.saveActionPlans(updated)
     } else if (deleteTarget.type === 'reset-questions') {
-      const def = surveyService.resetQuestions()
+      const def = await surveyService.resetQuestions()
       setQuestions(def)
     } else if (deleteTarget.type === 'reset-plans') {
-      const def = surveyService.resetActionPlans()
+      const def = await surveyService.resetActionPlans()
       setActionPlans(def)
     }
 
@@ -174,7 +210,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
   }
 
   const handleOpenAddQuestion = () => {
-    setEditingQuestion({
+    const draft: SurveyQuestion = {
       id: `q_${Date.now()}`,
       prompt: '',
       description: '',
@@ -186,12 +222,26 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
         { id: `opt_${Date.now()}_1`, label: 'Option 1', value: 'opt_1' },
         { id: `opt_${Date.now()}_2`, label: 'Option 2', value: 'opt_2' },
       ],
-    })
+    }
+    setEditingQuestion(draft)
+    setQuestionBaseline(draft)
     setIsQuestionModalOpen(true)
   }
 
+  const closeQuestionEditor = () => {
+    setIsQuestionModalOpen(false)
+    setEditingQuestion(null)
+    setQuestionBaseline(null)
+  }
+
+  const closePlanEditor = () => {
+    setIsPlanModalOpen(false)
+    setEditingPlan(null)
+    setPlanBaseline(null)
+  }
+
   const handleOpenAddPlan = () => {
-    setEditingPlan({
+    const draft: ActionPlan = {
       id: `plan_${Date.now()}`,
       title: 'New Custom Action Plan',
       tagline: 'Custom roadmap summary for score improvement',
@@ -227,9 +277,28 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
         'Curriculum Question Bank with detailed step explanations',
         'Official Digital Diagnostic Module Practice Sets',
       ],
-    })
+    }
+    setEditingPlan(draft)
+    setPlanBaseline(draft)
     setIsPlanModalOpen(true)
   }
+
+  const questionDraftDirty = Boolean(
+    isQuestionModalOpen && editingQuestion && questionBaseline &&
+      JSON.stringify(editingQuestion) !== JSON.stringify(questionBaseline)
+  )
+  const planDraftDirty = Boolean(
+    isPlanModalOpen && editingPlan && planBaseline &&
+      JSON.stringify(editingPlan) !== JSON.stringify(planBaseline)
+  )
+  const saveActiveDraft = async () => {
+    if (questionDraftDirty && editingQuestion) {
+      if (!(await handleSaveQuestion(editingQuestion))) throw new Error('Survey question was not saved.')
+    } else if (planDraftDirty && editingPlan) {
+      if (!(await handleSavePlan(editingPlan))) throw new Error('Action plan was not saved.')
+    }
+  }
+  const markDraftClean = useUnsavedChanges(questionDraftDirty || planDraftDirty, saveActiveDraft)
 
   // Filtered lists
   const filteredQuestions = useMemo(() => {
@@ -599,6 +668,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
                         type="button"
                         onClick={() => {
                           setEditingQuestion(q)
+                          setQuestionBaseline(JSON.parse(JSON.stringify(q)))
                           setIsQuestionModalOpen(true)
                         }}
                         className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-blue-600 transition cursor-pointer"
@@ -675,6 +745,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
                             type="button"
                             onClick={() => {
                               setEditingPlan(plan)
+                              setPlanBaseline(JSON.parse(JSON.stringify(plan)))
                               setIsPlanModalOpen(true)
                             }}
                             className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-blue-600 transition cursor-pointer"
@@ -795,7 +866,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsQuestionModalOpen(false)}
+                  onClick={closeQuestionEditor}
                   className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
                 >
                   <X className="h-4 w-4" />
@@ -952,7 +1023,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
               <div className="mt-6 flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setIsQuestionModalOpen(false)}
+                  onClick={closeQuestionEditor}
                   className="rounded-xl px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
                 >
                   Cancel
@@ -988,7 +1059,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsPlanModalOpen(false)}
+                  onClick={closePlanEditor}
                   className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
                 >
                   <X className="h-4 w-4" />
@@ -1209,7 +1280,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
               <div className="mt-6 flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setIsPlanModalOpen(false)}
+                  onClick={closePlanEditor}
                   className="rounded-xl px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
                 >
                   Cancel

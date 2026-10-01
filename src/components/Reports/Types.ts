@@ -40,6 +40,7 @@ export interface DomainPerformance {
   accuracyPct: number
   avgTimeSec: number
   classification: DomainClassification
+  classificationCriteria: string
   performanceFact: string
   actionableInsight: string
 }

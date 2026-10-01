@@ -30,6 +30,7 @@ export const TakeAssessmentPage: React.FC = () => {
   const navigate = useNavigate()
 
   const [assessment, setAssessment] = useState<Assessment | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [currentSectionIdx, setCurrentSectionIdx] = useState(0)
   const [currentQuestionIdx, setCurrentQuestionIdx] = useState(0)
   const [answers, setAnswers] = useState<Record<string, number | string>>({})
@@ -55,27 +56,28 @@ export const TakeAssessmentPage: React.FC = () => {
 
       if (attemptId) {
         const storedMeta = sessionStorage.getItem(`attempt_${attemptId}`)
-        if (storedMeta) {
-          try {
-            const parsed = JSON.parse(storedMeta)
-            if (parsed.assessmentId) {
-              targetAssessment = assessmentService.getAssessmentById(parsed.assessmentId)
-              if (!targetAssessment) {
-                const dbList = await assessmentService.fetchAssessmentsFromDatabase()
-                targetAssessment = dbList.find((a) => a.id === parsed.assessmentId) || null
-              }
+        if (!storedMeta) {
+          setLoadError('This assessment link is invalid or expired. Please open the shared assessment link again.')
+          return
+        }
+        try {
+          const parsed = JSON.parse(storedMeta)
+          if (parsed.assessmentId) {
+            targetAssessment = assessmentService.getAssessmentById(parsed.assessmentId)
+            if (!targetAssessment) {
+              const dbList = await assessmentService.fetchAssessmentsFromDatabase()
+              targetAssessment = dbList.find((a) => a.id === parsed.assessmentId) || null
             }
-          } catch {}
+          }
+        } catch {
+          setLoadError('This assessment link is invalid or expired. Please open the shared assessment link again.')
+          return
         }
       }
 
-      // Fallback to first assessment if not found in session
       if (!targetAssessment) {
-        let all = assessmentService.getAssessments()
-        if (all.length === 0) {
-          all = await assessmentService.fetchAssessmentsFromDatabase()
-        }
-        targetAssessment = all[0] || null
+        setLoadError('The assessment for this link is unavailable. Please request a new shared link.')
+        return
       }
 
       if (targetAssessment) {
@@ -134,6 +136,16 @@ export const TakeAssessmentPage: React.FC = () => {
       setIsTimeExpired(false)
       handleSectionComplete()
     }, 2000)
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="max-w-md rounded-xl border border-slate-200 bg-white p-6 text-center">
+          <p className="text-sm text-slate-700">{loadError}</p>
+        </div>
+      </div>
+    )
   }
 
   if (!assessment || assessment.sections.length === 0) {

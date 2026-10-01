@@ -36,6 +36,7 @@ import {
 import { assessmentService } from '../lib/assessmentService'
 import MathRenderer from '../components/MathRenderer'
 import MathSymbolInserter, { MathSymbolItem } from '../components/MathSymbolInserter'
+import { useUnsavedChanges } from '../contexts/UnsavedChangesContext'
 
 export const CreateQuestionPage: React.FC = () => {
   const navigate = useNavigate()
@@ -63,6 +64,7 @@ export const CreateQuestionPage: React.FC = () => {
   // Delete Question confirmation modal in edit mode
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
   // Pedagogical & Exam Metadata
   const [questionType, setQuestionType] = useState<'multiple_choice' | 'multi_select' | 'grid_in'>(
@@ -491,25 +493,27 @@ export const CreateQuestionPage: React.FC = () => {
   }
 
   // Save to Question Bank Service
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault()
+  const persistQuestion = () => {
     setFormError(null)
 
     if (!prompt.trim()) {
-      setFormError('Please enter a question prompt stem.')
-      return
+      const message = 'Please enter a question prompt stem.'
+      setFormError(message)
+      throw new Error(message)
     }
 
     if (questionType === 'multiple_choice' || questionType === 'multi_select') {
       const correctCount = choices.filter((c) => c.isCorrect).length
       if (correctCount === 0) {
-        setFormError('Please mark at least one correct answer key.')
-        return
+        const message = 'Please mark at least one correct answer key.'
+        setFormError(message)
+        throw new Error(message)
       }
     } else if (questionType === 'grid_in') {
       if (!numericAnswer.trim()) {
-        setFormError('Please specify the accepted numeric answer for this grid-in question.')
-        return
+        const message = 'Please specify the accepted numeric answer for this grid-in question.'
+        setFormError(message)
+        throw new Error(message)
       }
     }
 
@@ -542,6 +546,25 @@ export const CreateQuestionPage: React.FC = () => {
       questionBankService.addQuestion(questionItem)
     }
 
+    return questionItem
+  }
+
+  const saveBeforeNavigation = () => {
+    persistQuestion()
+    markClean()
+    setHasUnsavedChanges(false)
+  }
+  const markClean = useUnsavedChanges(hasUnsavedChanges, saveBeforeNavigation)
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      persistQuestion()
+      markClean()
+      setHasUnsavedChanges(false)
+    } catch {
+      return
+    }
     navigate('/admin/questions')
   }
 
@@ -656,6 +679,8 @@ export const CreateQuestionPage: React.FC = () => {
         {previewMode !== 'preview' && (
           <form
             onSubmit={handleSave}
+            onChangeCapture={() => setHasUnsavedChanges(true)}
+            onClickCapture={() => setHasUnsavedChanges(true)}
             className={`space-y-6 bg-white p-6 rounded-3xl border border-slate-200 shadow-xs ${
               previewMode === 'split' ? 'lg:col-span-7' : 'w-full'
             }`}

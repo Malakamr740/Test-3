@@ -1,3 +1,10 @@
+import { isSupabaseConfigured } from './supabaseClient'
+import {
+  deleteOrganizationConfig,
+  loadOrganizationConfig,
+  saveOrganizationConfig,
+} from './organizationConfigService'
+
 export interface ReportSectionConfig {
   id: string
   title: string
@@ -17,6 +24,137 @@ export interface RubricTier {
   recommendation: string
 }
 
+export interface CategoryLabelConfig {
+  strong: string
+  moderate: string
+  weak: string
+}
+
+export interface DomainRubricCopy {
+  criterion: string
+  explanation: string
+  recommendation: string
+}
+
+export type DomainRubricCopyConfig = Record<'strong' | 'moderate' | 'weak', DomainRubricCopy>
+
+export type ReportSectionId =
+  | 'showHeroMetrics'
+  | 'showThreeStateDonut'
+  | 'showStrongDomains'
+  | 'showWeakDomains'
+  | 'showTimeAnalysis'
+  | 'showTaxonomyTree'
+  | 'showErrorPatterns'
+  | 'showQuestionSolutions'
+  | 'showActionPlan'
+  | 'showCourseRecommendations'
+
+export type ReportRuleMetric =
+  | 'grade'
+  | 'score'
+  | 'totalTimeMinutes'
+  | 'avgTimeSeconds'
+  | 'questionCount'
+
+export interface ReportSectionRule {
+  metric: ReportRuleMetric
+  operator: 'gte' | 'lte' | 'equals' | 'contains'
+  value: string
+}
+
+export const REPORT_SECTION_DISPLAY_FIELDS: Record<ReportSectionId, Array<{ id: string; label: string }>> = {
+  showHeroMetrics: [
+    { id: 'banner', label: 'Header banner' },
+    { id: 'studentName', label: 'Student name' },
+    { id: 'assessmentName', label: 'Assessment name' },
+    { id: 'completedDate', label: 'Completion date' },
+    { id: 'score', label: 'Overall score' },
+    { id: 'classification', label: 'Classification' },
+    { id: 'duration', label: 'Total duration' },
+    { id: 'questionCount', label: 'Question count' },
+  ],
+  showThreeStateDonut: [
+    { id: 'chart', label: 'Donut chart' },
+    { id: 'accuracy', label: 'Accuracy' },
+    { id: 'statusBreakdown', label: 'Correct / incorrect / unanswered counts' },
+  ],
+  showStrongDomains: [
+    { id: 'domainName', label: 'Category name' },
+    { id: 'domainType', label: 'Category type' },
+    { id: 'classification', label: 'Strong / focus classification' },
+    { id: 'criterion', label: 'Why this category meets the rubric' },
+    { id: 'accuracy', label: 'Accuracy' },
+    { id: 'answerCount', label: 'Correct / total answers' },
+    { id: 'averageTime', label: 'Average time per question' },
+    { id: 'unanswered', label: 'Unanswered count' },
+    { id: 'explanation', label: 'Performance explanation and insight' },
+  ],
+  showWeakDomains: [
+    { id: 'domainName', label: 'Category name' },
+    { id: 'domainType', label: 'Category type' },
+    { id: 'classification', label: 'Strong / focus classification' },
+    { id: 'criterion', label: 'Why this category meets the rubric' },
+    { id: 'accuracy', label: 'Accuracy' },
+    { id: 'answerCount', label: 'Correct / total answers' },
+    { id: 'averageTime', label: 'Average time per question' },
+    { id: 'unanswered', label: 'Unanswered count' },
+    { id: 'explanation', label: 'Performance explanation and insight' },
+  ],
+  showTimeAnalysis: [
+    { id: 'overallAverage', label: 'Overall average time' },
+    { id: 'threshold', label: 'Pacing threshold' },
+    { id: 'categoryBreakdown', label: 'Category pacing table' },
+    { id: 'categoryName', label: 'Pacing table category names' },
+    { id: 'questionCount', label: 'Pacing table question counts' },
+    { id: 'averagePace', label: 'Pacing table average times' },
+    { id: 'variance', label: 'Pacing table benchmark variance' },
+    { id: 'pacingAssessment', label: 'Pacing table assessment' },
+    { id: 'quickest', label: 'Quickest question' },
+    { id: 'slowest', label: 'Slowest question' },
+  ],
+  showTaxonomyTree: [
+    { id: 'categories', label: 'Categories' },
+    { id: 'lessons', label: 'Chapters and lessons' },
+    { id: 'skills', label: 'Skills' },
+    { id: 'otherTypes', label: 'Other taxonomy types' },
+    { id: 'rowLabels', label: 'Category and item names' },
+    { id: 'answerCounts', label: 'Correct / total answers' },
+    { id: 'percentages', label: 'Percentages' },
+    { id: 'classifications', label: 'Performance classifications' },
+  ],
+  showErrorPatterns: [
+    { id: 'conceptual', label: 'Conceptual gaps' },
+    { id: 'rushed', label: 'Rushed mistakes' },
+    { id: 'timesink', label: 'Timesink mistakes' },
+    { id: 'summary', label: 'Summary sentence' },
+  ],
+  showQuestionSolutions: [
+    { id: 'questionText', label: 'Question text' },
+    { id: 'status', label: 'Answer status' },
+    { id: 'difficulty', label: 'Difficulty' },
+    { id: 'time', label: 'Time spent and test average' },
+    { id: 'taxonomy', label: 'Category, lesson, and skill' },
+    { id: 'studentResponse', label: 'Student response' },
+    { id: 'expectedSolution', label: 'Expected solution' },
+    { id: 'explanation', label: 'Step-by-step explanation' },
+  ],
+  showActionPlan: [
+    { id: 'audience', label: 'Target audience' },
+    { id: 'title', label: 'Plan title and tagline' },
+    { id: 'summary', label: 'Plan summary' },
+    { id: 'milestones', label: 'Milestones and tasks' },
+    { id: 'routine', label: 'Weekly routine' },
+    { id: 'advice', label: 'Key advice' },
+  ],
+  showCourseRecommendations: [
+    { id: 'recommendation', label: 'Study recommendation' },
+    { id: 'courseName', label: 'Course name' },
+    { id: 'description', label: 'Course description' },
+    { id: 'enrollmentLink', label: 'Enrollment link' },
+  ],
+}
+
 export interface ReportTemplateConfig {
   id: string
   assessmentId?: string // undefined or 'global' means default for all assessments
@@ -33,6 +171,10 @@ export interface ReportTemplateConfig {
   showQuestionSolutions: boolean
   showActionPlan: boolean
   showCourseRecommendations: boolean
+  categoryLabels: CategoryLabelConfig
+  domainRubricCopy: DomainRubricCopyConfig
+  sectionRules: Partial<Record<ReportSectionId, ReportSectionRule>>
+  sectionFields: Partial<Record<ReportSectionId, string[]>>
   
   // Custom threshold overrides
   strongThreshold: number
@@ -52,6 +194,41 @@ export interface ReportTemplateConfig {
 
 const STORAGE_KEY_PREFIX = 'math_diag_report_config_'
 const DEFAULT_GLOBAL_KEY = 'math_diag_report_config_global'
+
+function normalizeReportTemplate(parsed: Partial<ReportTemplateConfig>): ReportTemplateConfig {
+  return {
+    ...DEFAULT_GLOBAL_REPORT_TEMPLATE,
+    ...parsed,
+    categoryLabels: {
+      ...DEFAULT_GLOBAL_REPORT_TEMPLATE.categoryLabels,
+      ...(parsed.categoryLabels || {}),
+    },
+    domainRubricCopy: {
+      ...DEFAULT_GLOBAL_REPORT_TEMPLATE.domainRubricCopy,
+      ...(parsed.domainRubricCopy || {}),
+      strong: {
+        ...DEFAULT_GLOBAL_REPORT_TEMPLATE.domainRubricCopy.strong,
+        ...(parsed.domainRubricCopy?.strong || {}),
+      },
+      moderate: {
+        ...DEFAULT_GLOBAL_REPORT_TEMPLATE.domainRubricCopy.moderate,
+        ...(parsed.domainRubricCopy?.moderate || {}),
+      },
+      weak: {
+        ...DEFAULT_GLOBAL_REPORT_TEMPLATE.domainRubricCopy.weak,
+        ...(parsed.domainRubricCopy?.weak || {}),
+      },
+    },
+    sectionRules: {
+      ...DEFAULT_GLOBAL_REPORT_TEMPLATE.sectionRules,
+      ...(parsed.sectionRules || {}),
+    },
+    sectionFields: {
+      ...DEFAULT_GLOBAL_REPORT_TEMPLATE.sectionFields,
+      ...(parsed.sectionFields || {}),
+    },
+  }
+}
 
 export const DEFAULT_REPORT_RUBRIC_TIERS: RubricTier[] = [
   {
@@ -107,6 +284,30 @@ export const DEFAULT_GLOBAL_REPORT_TEMPLATE: ReportTemplateConfig = {
   showQuestionSolutions: true,
   showActionPlan: true,
   showCourseRecommendations: true,
+  categoryLabels: {
+    strong: 'Strong Domains',
+    moderate: 'Developing Domains',
+    weak: 'Focus Areas',
+  },
+  domainRubricCopy: {
+    strong: {
+      criterion: 'Category accuracy is at least {strongThreshold}%.',
+      explanation: '{category} scored {accuracy}% ({correct} of {total} correct), meeting the configured mastery threshold.',
+      recommendation: 'Continue with advanced practice and timed challenge sets in this area.',
+    },
+    moderate: {
+      criterion: 'Category accuracy is at least {moderateThreshold}% and below {strongThreshold}%.',
+      explanation: '{category} scored {accuracy}% ({correct} of {total} correct), placing it in the developing band.',
+      recommendation: 'Review missed questions and practice this category to build consistency.',
+    },
+    weak: {
+      criterion: 'Category accuracy is below {moderateThreshold}%.',
+      explanation: '{category} scored {accuracy}% ({correct} of {total} correct), below the configured benchmark.',
+      recommendation: 'Revisit foundational concepts in this category and complete guided practice before advancing.',
+    },
+  },
+  sectionRules: {},
+  sectionFields: {},
   strongThreshold: 75,
   moderateThreshold: 50,
   slowTimeThresholdPct: 25,
@@ -122,47 +323,90 @@ export const reportTemplateService = {
     try {
       if (assessmentId) {
         const custom = localStorage.getItem(`${STORAGE_KEY_PREFIX}${assessmentId}`)
-        if (custom) {
-          return { ...DEFAULT_GLOBAL_REPORT_TEMPLATE, ...JSON.parse(custom) }
-        }
+        if (custom) return normalizeReportTemplate(JSON.parse(custom))
       }
 
       const globalRaw = localStorage.getItem(DEFAULT_GLOBAL_KEY)
-      if (globalRaw) {
-        return { ...DEFAULT_GLOBAL_REPORT_TEMPLATE, ...JSON.parse(globalRaw) }
-      }
+      if (globalRaw) return normalizeReportTemplate(JSON.parse(globalRaw))
     } catch (e) {
       console.warn('Failed to load report template:', e)
     }
 
-    return { ...DEFAULT_GLOBAL_REPORT_TEMPLATE }
+    return normalizeReportTemplate(DEFAULT_GLOBAL_REPORT_TEMPLATE)
   },
 
-  saveTemplateForAssessment(assessmentId: string | undefined, template: ReportTemplateConfig): void {
+  async loadTemplateForAssessment(assessmentId?: string): Promise<ReportTemplateConfig> {
+    if (!isSupabaseConfigured) return this.getTemplateForAssessment(assessmentId)
+
     try {
-      const key = assessmentId ? `${STORAGE_KEY_PREFIX}${assessmentId}` : DEFAULT_GLOBAL_KEY
-      const payload = {
-        ...template,
-        updatedAt: new Date().toISOString(),
+      if (assessmentId) {
+        const assessmentConfig = await loadOrganizationConfig<Partial<ReportTemplateConfig>>(
+          'report_template',
+          assessmentId
+        )
+        if (assessmentConfig) {
+          const template = normalizeReportTemplate(assessmentConfig)
+          localStorage.setItem(`${STORAGE_KEY_PREFIX}${assessmentId}`, JSON.stringify(template))
+          return template
+        }
       }
-      localStorage.setItem(key, JSON.stringify(payload))
+
+      const globalConfig = await loadOrganizationConfig<Partial<ReportTemplateConfig>>('report_template')
+      if (globalConfig) {
+        const template = normalizeReportTemplate(globalConfig)
+        localStorage.setItem(DEFAULT_GLOBAL_KEY, JSON.stringify(template))
+        return template
+      }
     } catch (e) {
-      console.error('Failed to save report template:', e)
-      throw e
+      console.warn('Failed to load report template from Supabase; using local cache:', e)
+    }
+
+    return this.getTemplateForAssessment(assessmentId)
+  },
+
+  async loadTemplateForAttempt(attemptId: string, resumeToken: string): Promise<ReportTemplateConfig> {
+    if (!isSupabaseConfigured) return this.getTemplateForAssessment()
+
+    const { data, error } = await supabase.rpc('get_attempt_app_config', {
+      p_attempt_id: attemptId,
+      p_resume_token: resumeToken,
+      p_config_key: 'report_template',
+    })
+    if (error) {
+      console.warn('Failed to load report template for attempt:', error.message)
+      return this.getTemplateForAssessment()
+    }
+    return data ? normalizeReportTemplate(data) : this.getTemplateForAssessment()
+  },
+
+  async saveTemplateForAssessment(assessmentId: string | undefined, template: ReportTemplateConfig): Promise<void> {
+    const configKey = assessmentId ? `${STORAGE_KEY_PREFIX}${assessmentId}` : DEFAULT_GLOBAL_KEY
+    const payload = normalizeReportTemplate({ ...template, updatedAt: new Date().toISOString() })
+    localStorage.setItem(configKey, JSON.stringify(payload))
+
+    if (isSupabaseConfigured) {
+      try {
+        await saveOrganizationConfig('report_template', payload, assessmentId)
+      } catch (e) {
+        console.error('Failed to save report template to Supabase:', e)
+        throw e
+      }
     }
   },
 
-  resetTemplate(assessmentId?: string): ReportTemplateConfig {
+  async resetTemplate(assessmentId?: string): Promise<ReportTemplateConfig> {
     try {
       if (assessmentId) {
         localStorage.removeItem(`${STORAGE_KEY_PREFIX}${assessmentId}`)
       } else {
         localStorage.removeItem(DEFAULT_GLOBAL_KEY)
       }
+      if (isSupabaseConfigured) await deleteOrganizationConfig('report_template', assessmentId)
     } catch (e) {
       console.error('Failed to reset report template:', e)
+      throw e
     }
-    return { ...DEFAULT_GLOBAL_REPORT_TEMPLATE }
+    return normalizeReportTemplate(DEFAULT_GLOBAL_REPORT_TEMPLATE)
   },
 
   resolveRubricLevel(scorePercentage: number, template?: ReportTemplateConfig): RubricTier {

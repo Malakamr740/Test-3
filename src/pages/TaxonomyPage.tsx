@@ -21,6 +21,7 @@ import {
   RotateCcw,
 } from 'lucide-react'
 import { questionBankService, type TaxonomyRegistry, type QuestionBankItem } from '../lib/questionBankService'
+import { useUnsavedChanges } from '../contexts/UnsavedChangesContext'
 
 type ActiveTab = 'overview' | 'manage' | 'matrix'
 
@@ -161,6 +162,7 @@ export const TaxonomyPage: React.FC = () => {
 
   // Modal / Form state for Add/Edit
   const [modalMode, setModalMode] = useState<'addDomain' | 'editDomain' | 'addChapter' | 'editChapter' | 'addLesson' | 'editLesson' | null>(null)
+  const [hasTaxonomyDraftChanges, setHasTaxonomyDraftChanges] = useState(false)
   const [formDomainName, setFormDomainName] = useState('')
   const [formDomainUnitLabel, setFormDomainUnitLabel] = useState('')
   const [formDomainCode, setFormDomainCode] = useState('')
@@ -396,8 +398,19 @@ export const TaxonomyPage: React.FC = () => {
     setModalMode('editLesson')
   }
 
-  const handleSaveModal = (e: React.FormEvent) => {
-    e.preventDefault()
+  const persistTaxonomyModal = () => {
+    if (!modalMode) return false
+    const requiresDomainName = modalMode === 'addDomain' || modalMode === 'editDomain'
+    const requiresChapterName = modalMode === 'addChapter' || modalMode === 'editChapter'
+    const requiresLessonName = modalMode === 'addLesson' || modalMode === 'editLesson'
+    if (
+      (requiresDomainName && !formDomainName.trim()) ||
+      (requiresChapterName && !formChapterName.trim()) ||
+      (requiresLessonName && !formLessonName.trim())
+    ) {
+      return false
+    }
+
     if (modalMode === 'addDomain' && formDomainName.trim()) {
       questionBankService.addDomain(formDomainName.trim(), formDomainUnitLabel.trim(), formDomainCode.trim())
       setSelectedDomain(formDomainName.trim())
@@ -443,7 +456,26 @@ export const TaxonomyPage: React.FC = () => {
     }
 
     setModalMode(null)
+    setHasTaxonomyDraftChanges(false)
     refreshData()
+    return true
+  }
+
+  const handleSaveModal = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!persistTaxonomyModal()) {
+      setStatusMessage({ type: 'error', text: 'Enter a name before saving this taxonomy item.' })
+    }
+  }
+
+  const saveTaxonomyBeforeNavigation = () => {
+    if (!persistTaxonomyModal()) throw new Error('Enter a name before saving this taxonomy item.')
+  }
+  useUnsavedChanges(hasTaxonomyDraftChanges, saveTaxonomyBeforeNavigation)
+
+  const closeTaxonomyModal = () => {
+    setModalMode(null)
+    setHasTaxonomyDraftChanges(false)
   }
 
   const handleOpenDeleteDomain = (domainName: string) => {
@@ -1253,7 +1285,12 @@ export const TaxonomyPage: React.FC = () => {
               </p>
             </div>
 
-            <form onSubmit={handleSaveModal} className="space-y-3.5">
+            <form
+              onSubmit={handleSaveModal}
+              onChangeCapture={() => setHasTaxonomyDraftChanges(true)}
+              onClickCapture={() => setHasTaxonomyDraftChanges(true)}
+              className="space-y-3.5"
+            >
               {/* Domain inputs */}
               {(modalMode === 'addDomain' || modalMode === 'editDomain') && (
                 <>
@@ -1549,7 +1586,7 @@ export const TaxonomyPage: React.FC = () => {
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setModalMode(null)}
+                  onClick={closeTaxonomyModal}
                   className="px-3 py-1.5 text-xs text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl"
                 >
                   Cancel

@@ -3,6 +3,7 @@ interface ThreeStateSummaryProps {
   incorrectCount: number
   unansweredCount: number
   total: number
+  visibleFields?: string[]
 }
 
 export function ThreeStateBadge({
@@ -47,7 +48,11 @@ export default function ThreeStateDonutChart({
   incorrectCount,
   unansweredCount,
   total,
+  visibleFields,
 }: ThreeStateSummaryProps) {
+  const showField = (field: string) => !visibleFields || visibleFields.includes(field)
+  const showChart = showField('chart')
+  const showStatusBreakdown = showField('statusBreakdown')
   const safeTotal = total > 0 ? total : correctCount + incorrectCount + unansweredCount
   const correctPct = safeTotal > 0 ? Math.round((correctCount / safeTotal) * 100) : 0
   const incorrectPct = safeTotal > 0 ? Math.round((incorrectCount / safeTotal) * 100) : 0
@@ -68,7 +73,7 @@ export default function ThreeStateDonutChart({
   return (
     <div className="flex flex-col sm:flex-row items-center gap-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       {/* SVG Donut */}
-      <div className="relative flex h-28 w-28 shrink-0 items-center justify-center">
+      {showChart && <div className="relative flex h-28 w-28 shrink-0 items-center justify-center">
         <svg className="h-full w-full -rotate-90 transform" viewBox="0 0 100 100">
           {/* Background circle */}
           <circle
@@ -128,16 +133,20 @@ export default function ThreeStateDonutChart({
 
         {/* Center label */}
         <div className="absolute flex flex-col items-center justify-center text-center">
-          <span className="text-xl font-bold tracking-tight text-slate-900">{correctPct}%</span>
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            Accuracy
-          </span>
+          {showField('accuracy') && (
+            <>
+              <span className="text-xl font-bold tracking-tight text-slate-900">{correctPct}%</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                Accuracy
+              </span>
+            </>
+          )}
         </div>
-      </div>
+      </div>}
 
       {/* Legend & Breakdown stats */}
-      <div className="flex-1 w-full space-y-3">
-        <div className="grid grid-cols-3 gap-3">
+      {showStatusBreakdown && <div className="flex-1 w-full space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {/* Correct */}
           <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 text-center sm:text-left">
             <div className="flex items-center justify-center sm:justify-start gap-1.5 text-xs font-semibold text-emerald-800">
@@ -175,7 +184,7 @@ export default function ThreeStateDonutChart({
           <div style={{ width: `${incorrectPct}%` }} className="h-full bg-rose-500" title={`Incorrect: ${incorrectPct}%`} />
           <div style={{ width: `${unansweredPct}%` }} className="h-full bg-slate-400" title={`Unanswered: ${unansweredPct}%`} />
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

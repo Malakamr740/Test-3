@@ -16,43 +16,52 @@ interface AuthContextType {
   signOut: () => Promise<void>
 }
 
-const defaultProfile: UserProfile = {
-  id: 'demo-admin-id',
-  email: 'admin@mathplatform.edu',
-  full_name: 'Lead Mathematics Instructor',
-  role: 'Admin',
-}
-
 const AuthContext = createContext<AuthContextType>({
-  session: { user: { email: defaultProfile.email } },
-  profile: defaultProfile,
-  loading: false,
-  signIn: async () => ({ error: null }),
+  session: null,
+  profile: null,
+  loading: true,
+  signIn: async () => ({ error: 'Authentication is unavailable.' }),
   signOut: async () => {},
 })
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [session, setSession] = useState<any>({ user: { email: defaultProfile.email } })
-  const [profile, setProfile] = useState<UserProfile | null>(defaultProfile)
-  const [loading, setLoading] = useState(false)
+  const [session, setSession] = useState<any>(null)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
-      setSession({ user: { email: defaultProfile.email } })
-      setProfile(defaultProfile)
+      setSession(null)
+      setProfile(null)
+      setLoading(false)
       return
     }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let active = true
+
+    const loadProfile = async (user: any) => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      if (!active) return
+      setProfile({
+        id: user.id,
+        email: user.email,
+        full_name: user.user_metadata?.full_name || user.email?.split('@')[0],
+        role: data?.role || user.app_metadata?.role,
+      })
+    }
+
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!active) return
       setSession(session)
-      if (session?.user) {
-        setProfile({
-          id: session.user.id,
-          email: session.user.email,
-          full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-          role: session.user.user_metadata?.role || 'Admin',
-        })
-      }
+      if (session?.user) await loadProfile(session.user)
+      if (active) setLoading(false)
+    }).catch(() => {
+      if (active) setLoading(false)
     })
 
     const {
@@ -60,47 +69,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session?.user) {
-        setProfile({
-          id: session.user.id,
-          email: session.user.email,
-          full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-          role: session.user.user_metadata?.role || 'Admin',
-        })
+        setLoading(true)
+        void loadProfile(session.user).finally(() => setLoading(false))
       } else {
         setProfile(null)
+        setLoading(false)
       }
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   const signIn = async (email: string, password?: string): Promise<{ error: string | null }> => {
-    if (isSupabaseConfigured) {
-      if (password) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) return { error: error.message }
-        return { error: null }
-      } else {
-        const { error } = await supabase.auth.signInWithOtp({ email })
-        if (error) return { error: error.message }
-        return { error: null }
-      }
-    } else {
-      setProfile({
-        id: 'demo-admin-id',
-        email,
-        full_name: email.split('@')[0],
-        role: 'Admin',
-      })
-      setSession({ user: { email } })
-      return { error: null }
+    if (!isSupabaseConfigured) return { error: 'Authentication is not configured. Contact your administrator.' }
+    if (!password) return { error: 'A password is required.' }
+
+    const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) return { error: error.message }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', authData.user.id)
+      .maybeSingle()
+    const role = String(profile?.role || authData.user.app_metadata?.role || '').trim().toLowerCase()
+    if (role !== 'admin' && role !== 'teacher') {
+      await supabase.auth.signOut()
+      return { error: 'This account is not authorized for the teacher/admin workspace.' }
     }
+
+    return { error: null }
   }
 
   const signOut = async () => {
-    if (isSupabaseConfigured) {
-      await supabase.auth.signOut()
-    }
+    if (isSupabaseConfigured) await supabase.auth.signOut()
     setSession(null)
     setProfile(null)
   }

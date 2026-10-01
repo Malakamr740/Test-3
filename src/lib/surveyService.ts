@@ -1,3 +1,6 @@
+import { isSupabaseConfigured } from './supabaseClient'
+import { loadOrganizationConfig, saveOrganizationConfig } from './organizationConfigService'
+
 export interface SurveyQuestionOption {
   id: string
   label: string
@@ -387,12 +390,27 @@ export const surveyService = {
     return DEFAULT_SURVEY_QUESTIONS
   },
 
-  saveQuestions(questions: SurveyQuestion[]): void {
-    localStorage.setItem(STORAGE_KEYS.SURVEY_QUESTIONS, JSON.stringify(questions))
+  async loadQuestionsFromDatabase(): Promise<SurveyQuestion[]> {
+    if (!isSupabaseConfigured) return this.getQuestions()
+    try {
+      const saved = await loadOrganizationConfig<SurveyQuestion[]>('survey_questions')
+      if (saved?.length) {
+        localStorage.setItem(STORAGE_KEYS.SURVEY_QUESTIONS, JSON.stringify(saved))
+        return saved.sort((a, b) => a.order_index - b.order_index)
+      }
+    } catch (error) {
+      console.warn('Failed to load survey questions from Supabase; using local cache:', error)
+    }
+    return this.getQuestions()
   },
 
-  resetQuestions(): SurveyQuestion[] {
-    localStorage.setItem(STORAGE_KEYS.SURVEY_QUESTIONS, JSON.stringify(DEFAULT_SURVEY_QUESTIONS))
+  async saveQuestions(questions: SurveyQuestion[]): Promise<void> {
+    localStorage.setItem(STORAGE_KEYS.SURVEY_QUESTIONS, JSON.stringify(questions))
+    if (isSupabaseConfigured) await saveOrganizationConfig('survey_questions', questions)
+  },
+
+  async resetQuestions(): Promise<SurveyQuestion[]> {
+    await this.saveQuestions(DEFAULT_SURVEY_QUESTIONS)
     return DEFAULT_SURVEY_QUESTIONS
   },
 
@@ -411,12 +429,27 @@ export const surveyService = {
     return DEFAULT_ACTION_PLANS
   },
 
-  saveActionPlans(plans: ActionPlan[]): void {
-    localStorage.setItem(STORAGE_KEYS.ACTION_PLANS, JSON.stringify(plans))
+  async loadActionPlansFromDatabase(): Promise<ActionPlan[]> {
+    if (!isSupabaseConfigured) return this.getActionPlans()
+    try {
+      const saved = await loadOrganizationConfig<ActionPlan[]>('action_plans')
+      if (saved?.length) {
+        localStorage.setItem(STORAGE_KEYS.ACTION_PLANS, JSON.stringify(saved))
+        return saved
+      }
+    } catch (error) {
+      console.warn('Failed to load action plans from Supabase; using local cache:', error)
+    }
+    return this.getActionPlans()
   },
 
-  resetActionPlans(): ActionPlan[] {
-    localStorage.setItem(STORAGE_KEYS.ACTION_PLANS, JSON.stringify(DEFAULT_ACTION_PLANS))
+  async saveActionPlans(plans: ActionPlan[]): Promise<void> {
+    localStorage.setItem(STORAGE_KEYS.ACTION_PLANS, JSON.stringify(plans))
+    if (isSupabaseConfigured) await saveOrganizationConfig('action_plans', plans)
+  },
+
+  async resetActionPlans(): Promise<ActionPlan[]> {
+    await this.saveActionPlans(DEFAULT_ACTION_PLANS)
     return DEFAULT_ACTION_PLANS
   },
 

@@ -42,6 +42,7 @@ export interface TaxonomyTreeProps {
 
   // Report breakdown mode
   breakdowns?: BreakdownRow[]
+  visibleFields?: string[]
   onSelect?: (type: TaxonomyType, label: string) => void
   activeFilter?: { type: TaxonomyType; label: string } | null
 }
@@ -129,6 +130,7 @@ export const TaxonomyTree: React.FC<TaxonomyTreeProps> = ({
   onAddChild,
   onDeleteNode,
   breakdowns,
+  visibleFields,
   onSelect,
   activeFilter,
 }) => {
@@ -169,6 +171,7 @@ export const TaxonomyTree: React.FC<TaxonomyTreeProps> = ({
 
   // 2. If breakdowns prop is provided (Report breakdown mode)
   if (breakdowns && breakdowns.length > 0) {
+    const showField = (field: string) => !visibleFields || visibleFields.includes(field)
     const categories = breakdowns.filter((b) => b.type === 'category')
     const lessons = breakdowns.filter((b) => b.type === 'lesson')
     const skills = breakdowns.filter((b) => b.type === 'skill')
@@ -205,14 +208,18 @@ export const TaxonomyTree: React.FC<TaxonomyTreeProps> = ({
             ) : (
               <Tag className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
             )}
-            <span className="truncate text-slate-800">{b.label}</span>
+            {showField('rowLabels') && <span className="truncate text-slate-800">{b.label}</span>}
           </div>
 
+          {(showField('answerCounts') || showField('percentages') || showField('classifications')) && (
           <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[11px] text-slate-400">
-              {b.correct_count}/{b.total_questions} ({Math.round(b.percentage)}%)
-            </span>
-            {b.classification && (
+            {showField('answerCounts') && <span className="text-[11px] text-slate-400">
+              {b.correct_count}/{b.total_questions}
+            </span>}
+            {showField('percentages') && <span className="text-[11px] text-slate-400">
+              {Math.round(b.percentage)}%
+            </span>}
+            {showField('classifications') && b.classification && (
               <span
                 className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${pillClass}`}
               >
@@ -220,6 +227,7 @@ export const TaxonomyTree: React.FC<TaxonomyTreeProps> = ({
               </span>
             )}
           </div>
+          )}
         </div>
       )
     }

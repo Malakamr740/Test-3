@@ -1,6 +1,15 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import {
+  createBrowserRouter,
+  createRoutesFromElements,
+  Navigate,
+  Outlet,
+  Route,
+  RouterProvider,
+  useParams,
+} from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
+import { UnsavedChangesProvider } from './contexts/UnsavedChangesContext'
 
 import LoginPage from './pages/LoginPage'
 import AdminDashboardPage from './pages/AdminDashboardPage'
@@ -22,15 +31,23 @@ import ReportPage from './pages/ReportPage'
 import { SurveyActionPlanAdminPage } from './pages/SurveyActionPlanAdminPage'
 import ReportSettingsPage from './pages/ReportSettingsPage'
 
-export function App() {
+function AppProviders() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
+    <AuthProvider>
+      <UnsavedChangesProvider>
+        <Outlet />
+      </UnsavedChangesProvider>
+    </AuthProvider>
+  )
+}
+
+const router = createBrowserRouter(
+  createRoutesFromElements(
+    <Route element={<AppProviders />}>
           {/* Public student flow */}
           <Route path="/assessment/:assessmentId" element={<StudentAssessmentPage />} />
           <Route path="/take/:attemptId" element={<TakeAssessmentPage />} />
-          <Route path="/report/:attemptId" element={<ReportPage />} />
+          <Route path="/report/:attemptId" element={<ReportRoute />} />
 
           {/* Auth */}
           <Route path="/login" element={<LoginPage />} />
@@ -167,9 +184,22 @@ export function App() {
 
           <Route path="/" element={<Navigate to="/admin" replace />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+    </Route>
+  )
+)
+
+export function App() {
+  return <RouterProvider router={router} />
+}
+
+function ReportRoute() {
+  const { attemptId } = useParams()
+  return attemptId === 'demo' ? (
+    <ProtectedRoute>
+      <ReportPage />
+    </ProtectedRoute>
+  ) : (
+    <ReportPage />
   )
 }
 

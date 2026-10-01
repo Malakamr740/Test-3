@@ -17,9 +17,14 @@ import {
 } from '../lib/diagnosticAnalytics'
 import type { CourseItem, QuestionReviewItem, ReportData, TaxonomyType } from '../components/Reports/Types'
 import { surveyService, type ActionPlan } from '../lib/surveyService'
-import { Sparkles, CheckCircle2, Sliders } from 'lucide-react'
+import { Sparkles, CheckCircle2 } from 'lucide-react'
 import { attemptService } from '../lib/attemptService'
-import { reportTemplateService, type ReportTemplateConfig } from '../lib/reportTemplateService'
+import {
+  reportTemplateService,
+  type ReportSectionId,
+  type ReportTemplateConfig,
+} from '../lib/reportTemplateService'
+import { useAuth } from '../contexts/AuthContext'
 
 // Configurable thresholds for domain mastery classification
 export const CONFIG_STRONG_THRESHOLD = STRONG_DOMAIN_THRESHOLD // 75%
@@ -34,9 +39,16 @@ function formatTime(s: number) {
 export default function ReportPage() {
   const { attemptId } = useParams()
   const [searchParams] = useSearchParams()
+  const { session, profile, loading: authLoading } = useAuth()
   const resumeToken = searchParams.get('token')
+  const role = profile?.role?.trim().toLowerCase()
+  const isStaff = Boolean(session && (role === 'admin' || role === 'teacher'))
 
   const [report, setReport] = useState<ReportData | null>(null)
+  const [reportAssessmentId, setReportAssessmentId] = useState<string | undefined>()
+  const [persistedTemplate, setPersistedTemplate] = useState<ReportTemplateConfig>(() =>
+    reportTemplateService.getTemplateForAssessment()
+  )
   const [loading, setLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [filter, setFilter] = useState<{ type: TaxonomyType; label: string } | null>(null)
@@ -54,11 +66,32 @@ export default function ReportPage() {
 
   useEffect(() => {
     async function load() {
-      // 1. Try local attemptService first
+      if (authLoading) return
+
+      let hasSharedAttempt = false
       if (attemptId) {
+        const attemptRaw = sessionStorage.getItem(`attempt_${attemptId}`)
+        if (attemptRaw) {
+          try {
+            const metadata = JSON.parse(attemptRaw)
+            hasSharedAttempt = metadata.attemptId === attemptId && Boolean(metadata.assessmentId)
+          } catch {}
+        }
+      }
+
+      const canReadReport = isStaff || hasSharedAttempt || Boolean(resumeToken)
+      if (attemptId !== 'demo' && !canReadReport) {
+        setErrorMessage('Open this report through the shared assessment attempt link.')
+        setLoading(false)
+        return
+      }
+
+      // 1. Try local attemptService first
+      if (attemptId && attemptId !== 'demo' && (isStaff || hasSharedAttempt)) {
         try {
           const storedRec = attemptService.getAttemptById(attemptId)
           if (storedRec && storedRec.report_data) {
+            setReportAssessmentId(storedRec.assessment_id)
             setReport(storedRec.report_data)
             setLoading(false)
             return
@@ -67,10 +100,11 @@ export default function ReportPage() {
           // Try direct Supabase attempts table
           const { data: dbAtt } = await supabase
             .from('attempts')
-            .select('report_data')
+            .select('report_data, assessment_id')
             .eq('id', attemptId)
             .maybeSingle()
 
+          if (dbAtt?.assessment_id) setReportAssessmentId(dbAtt.assessment_id)
           if (dbAtt && dbAtt.report_data) {
             setReport(dbAtt.report_data as ReportData)
             setLoading(false)
@@ -106,6 +140,12 @@ export default function ReportPage() {
             return
           }
         } catch {}
+      }
+
+      if (attemptId !== 'demo') {
+        setErrorMessage('This report is unavailable. Open it from a completed assessment attempt link.')
+        setLoading(false)
+        return
       }
 
       const earnedPts = parsedLocal?.earnedPoints ?? 3
@@ -234,17 +274,49 @@ export default function ReportPage() {
     }
 
     load()
-  }, [attemptId, resumeToken])
+  }, [attemptId, resumeToken, authLoading, isStaff])
+
+  useEffect(() => {
+    let active = true
+    const loadTemplate = resumeToken && attemptId
+      ? reportTemplateService.loadTemplateForAttempt(attemptId, resumeToken)
+      : reportTemplateService.loadTemplateForAssessment(reportAssessmentId)
+    loadTemplate.then((template) => {
+      if (active) setPersistedTemplate(template)
+    })
+    return () => {
+      active = false
+    }
+  }, [reportAssessmentId, attemptId, resumeToken])
 
   // Analytics computations
   const templateConfig = useMemo<ReportTemplateConfig>(() => {
-    // Try to resolve custom assessment template if assessment is identifiable
-    const currentAssessmentId =
-      report?.student_info?.assessment_name
-        ? undefined
-        : undefined
-    return reportTemplateService.getTemplateForAssessment(currentAssessmentId)
-  }, [report])
+    const base = persistedTemplate
+    if (searchParams.get('preview') !== '1') return base
+
+    try {
+      const rawPreview = sessionStorage.getItem('math_diag_report_preview')
+      if (!rawPreview) return base
+      const preview = JSON.parse(rawPreview) as Partial<ReportTemplateConfig>
+      return {
+        ...base,
+        ...preview,
+        categoryLabels: { ...base.categoryLabels, ...preview.categoryLabels },
+        domainRubricCopy: {
+          ...base.domainRubricCopy,
+          ...preview.domainRubricCopy,
+          strong: { ...base.domainRubricCopy.strong, ...preview.domainRubricCopy?.strong },
+          moderate: { ...base.domainRubricCopy.moderate, ...preview.domainRubricCopy?.moderate },
+          weak: { ...base.domainRubricCopy.weak, ...preview.domainRubricCopy?.weak },
+        },
+        sectionRules: { ...base.sectionRules, ...preview.sectionRules },
+        sectionFields: { ...base.sectionFields, ...preview.sectionFields },
+      }
+    } catch (err) {
+      console.warn('Failed to load report preview settings:', err)
+      return base
+    }
+  }, [persistedTemplate, searchParams])
 
   const analytics = useMemo(() => {
     if (!report) return null
@@ -256,7 +328,8 @@ export default function ReportPage() {
     const domainPerf = computeDomainPerformance(
       report,
       strongThresh,
-      moderateThresh
+      moderateThresh,
+      templateConfig.domainRubricCopy
     )
 
     const timeAnalysis = computeTimeAnalysis(
@@ -280,6 +353,11 @@ export default function ReportPage() {
       (reg.student_email as string) ||
       (reg.parent_email as string) ||
       null
+    const gradeEntry = Object.entries(reg).find(
+      ([key, value]) =>
+        /grade|level|year/i.test(key) && value !== null && value !== undefined && String(value).trim()
+    )
+    const studentGrade = gradeEntry ? String(gradeEntry[1]) : ''
 
     // Evaluate Rubric Tier dynamically
     const rubricTier = reportTemplateService.resolveRubricLevel(report.overall.percentage, templateConfig)
@@ -290,6 +368,7 @@ export default function ReportPage() {
       threeState,
       studentName,
       studentEmail,
+      studentGrade,
       rubricTier,
       completedLabel: studentInfo.completed_at
         ? new Date(studentInfo.completed_at).toLocaleDateString(undefined, {
@@ -330,7 +409,7 @@ export default function ReportPage() {
 
   // Auto-download as PDF and trigger email delivery once report is ready
   useEffect(() => {
-    if (!report || !analytics || hasAutoProcessedRef.current) return
+    if (!report || !analytics || attemptId === 'demo' || hasAutoProcessedRef.current) return
 
     // Small delay to ensure all KaTeX equations and fonts render completely before capture
     const timer = setTimeout(() => {
@@ -470,6 +549,66 @@ export default function ReportPage() {
   const { domainPerf, timeAnalysis, threeState, studentName, completedLabel, durationLabel, avgTime } =
     analytics
 
+  const shouldShowSection = (sectionId: ReportSectionId) => {
+    if (templateConfig[sectionId] === false) return false
+
+    const rule = templateConfig.sectionRules?.[sectionId]
+    if (!rule || !rule.value.trim()) return true
+
+    if (rule.metric === 'grade') {
+      const grade = analytics.studentGrade.toLocaleLowerCase()
+      const expected = rule.value.trim().toLocaleLowerCase()
+      if (!grade) return false
+      return rule.operator === 'equals' ? grade === expected : grade.includes(expected)
+    }
+
+    const actualValue =
+      rule.metric === 'score'
+        ? overall.percentage
+        : rule.metric === 'totalTimeMinutes'
+        ? student_info.total_time_seconds / 60
+        : rule.metric === 'avgTimeSeconds'
+        ? overall.avg_time_per_question
+        : questions.length
+    const expectedValue = Number(rule.value)
+    if (!Number.isFinite(expectedValue)) return true
+    if (rule.operator === 'lte') return actualValue <= expectedValue
+    if (rule.operator === 'equals') return actualValue === expectedValue
+    return actualValue >= expectedValue
+  }
+  const isSectionFieldVisible = (sectionId: ReportSectionId, fieldId: string) =>
+    templateConfig.sectionFields?.[sectionId]?.includes(fieldId) ?? true
+
+  const displayedBreakdowns = breakdowns.filter((breakdown) => {
+    if (breakdown.type === 'category') return isSectionFieldVisible('showTaxonomyTree', 'categories')
+    if (breakdown.type === 'chapter' || breakdown.type === 'lesson') {
+      return isSectionFieldVisible('showTaxonomyTree', 'lessons')
+    }
+    if (breakdown.type === 'skill') return isSectionFieldVisible('showTaxonomyTree', 'skills')
+    return isSectionFieldVisible('showTaxonomyTree', 'otherTypes')
+  })
+
+  const categorySections = [
+      {
+        sectionId: 'showStrongDomains' as const,
+        key: 'strong',
+        tone: 'emerald',
+        label: templateConfig.categoryLabels?.strong || 'Strong Domains',
+        description: `Performance at or above the ${templateConfig.strongThreshold || CONFIG_STRONG_THRESHOLD}% benchmark`,
+        items: domainPerf.strongDomains,
+        emptyMessage: `No domains currently exceed the ${templateConfig.strongThreshold || CONFIG_STRONG_THRESHOLD}% threshold.`,
+      },
+      {
+        sectionId: 'showWeakDomains' as const,
+        key: 'weak',
+        tone: 'rose',
+        label: templateConfig.categoryLabels?.weak || 'Focus Areas',
+        description: `Performance below the ${templateConfig.moderateThreshold || CONFIG_MODERATE_THRESHOLD}% benchmark`,
+        items: domainPerf.weakDomains,
+        emptyMessage: 'No domains require immediate reinforcement at this time.',
+      },
+    ]
+
   return (
     <div className="print-page min-h-screen bg-slate-50 text-slate-900">
       {/* Sticky Header Toolbar (no-print) */}
@@ -485,14 +624,6 @@ export default function ReportPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Link
-              to="/admin/report-settings"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-2xs transition"
-              title="Customize report sections and rubrics"
-            >
-              <Sliders className="h-3.5 w-3.5 text-blue-600" />
-              <span>Customize Report Layout</span>
-            </Link>
             <button
               onClick={() => handleExportAndEmail(true)}
               disabled={pdfGenerating}
@@ -555,38 +686,54 @@ export default function ReportPage() {
         )}
 
         {/* Hero Section */}
-        {templateConfig.showHeroMetrics !== false && (
+        {shouldShowSection('showHeroMetrics') && (
           <section className="rounded-3xl bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 p-6 sm:p-8 text-white shadow-floating">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs font-medium uppercase tracking-wider text-white/80">
+              {isSectionFieldVisible('showHeroMetrics', 'banner') && <div className="text-xs font-medium uppercase tracking-wider text-white/80">
                 {templateConfig.headerBannerText || 'Student Diagnostic Evaluation'}
-              </div>
-              {(analytics.rubricTier?.name || overall.level?.name) && (
+              </div>}
+              {isSectionFieldVisible('showHeroMetrics', 'classification') && (analytics.rubricTier?.name || overall.level?.name) && (
                 <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-semibold backdrop-blur">
                   Tier: {analytics.rubricTier?.name || overall.level?.name}
                 </span>
               )}
             </div>
 
-            <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight">{studentName}</h1>
-            <p className="mt-1 text-sm sm:text-base text-white/85">
-              {student_info.assessment_name} · Completed {completedLabel}
-            </p>
+            {isSectionFieldVisible('showHeroMetrics', 'studentName') && (
+              <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight">{studentName}</h1>
+            )}
+            {(isSectionFieldVisible('showHeroMetrics', 'assessmentName') ||
+              isSectionFieldVisible('showHeroMetrics', 'completedDate')) && (
+              <p className="mt-1 text-sm sm:text-base text-white/85">
+                {isSectionFieldVisible('showHeroMetrics', 'assessmentName') && student_info.assessment_name}
+                {isSectionFieldVisible('showHeroMetrics', 'assessmentName') &&
+                  isSectionFieldVisible('showHeroMetrics', 'completedDate') && ' · '}
+                {isSectionFieldVisible('showHeroMetrics', 'completedDate') && `Completed ${completedLabel}`}
+              </p>
+            )}
 
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <HeroMetric label="Overall Score" value={`${overall.percentage}%`} />
-              <HeroMetric
-                label="Classification"
-                value={analytics.rubricTier?.name || overall.level?.name || 'Assessed'}
-              />
-              <HeroMetric label="Total Duration" value={durationLabel} />
-              <HeroMetric label="Questions Assessed" value={`${questions.length}`} />
+              {isSectionFieldVisible('showHeroMetrics', 'score') && (
+                <HeroMetric label="Overall Score" value={`${overall.percentage}%`} />
+              )}
+              {isSectionFieldVisible('showHeroMetrics', 'classification') && (
+                <HeroMetric
+                  label="Classification"
+                  value={analytics.rubricTier?.name || overall.level?.name || 'Assessed'}
+                />
+              )}
+              {isSectionFieldVisible('showHeroMetrics', 'duration') && (
+                <HeroMetric label="Total Duration" value={durationLabel} />
+              )}
+              {isSectionFieldVisible('showHeroMetrics', 'questionCount') && (
+                <HeroMetric label="Questions Assessed" value={`${questions.length}`} />
+              )}
             </div>
           </section>
         )}
 
         {/* Three-State Question Classification Donut & Breakdown */}
-        {templateConfig.showThreeStateDonut !== false && (
+        {shouldShowSection('showThreeStateDonut') && (
           <section>
             <div className="mb-2">
               <h2 className="text-lg font-semibold text-slate-900">Scoring & Response Status</h2>
@@ -599,135 +746,131 @@ export default function ReportPage() {
               incorrectCount={threeState.incorrectCount}
               unansweredCount={threeState.unansweredCount}
               total={threeState.total}
+              visibleFields={templateConfig.sectionFields?.showThreeStateDonut}
             />
           </section>
         )}
 
-        {/* Strong Domains Section */}
-        {templateConfig.showStrongDomains !== false && (
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">
-                    ✓
-                  </span>
-                  <h2 className="text-lg font-semibold text-slate-900">Strong Domains</h2>
+        {categorySections.map((section) => {
+          if (!shouldShowSection(section.sectionId)) return null
+
+          const badgeTone =
+            section.tone === 'emerald'
+              ? 'bg-emerald-100 text-emerald-800'
+              : section.tone === 'amber'
+              ? 'bg-amber-100 text-amber-800'
+              : 'bg-rose-100 text-rose-800'
+
+          const icon =
+            section.tone === 'emerald' ? '✓' : section.tone === 'amber' ? '•' : '!'
+
+          return (
+            <section key={section.key} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                        section.tone === 'emerald'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : section.tone === 'amber'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-rose-100 text-rose-700'
+                      }`}
+                    >
+                      {icon}
+                    </span>
+                    <h2 className="text-lg font-semibold text-slate-900">{section.label}</h2>
+                  </div>
+                  <p className="mt-0.5 text-xs sm:text-sm text-slate-500">{section.description}</p>
                 </div>
-                <p className="mt-0.5 text-xs sm:text-sm text-slate-500">
-                  Taxonomy areas demonstrating high mastery (accuracy &ge; {templateConfig.strongThreshold || CONFIG_STRONG_THRESHOLD}%)
-                </p>
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${badgeTone}`}>
+                  {section.items.length} {section.items.length === 1 ? 'Area' : 'Areas'}
+                </span>
               </div>
-              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                {domainPerf.strongDomains.length}{' '}
-                {domainPerf.strongDomains.length === 1 ? 'Domain' : 'Domains'}
-              </span>
-            </div>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              {domainPerf.strongDomains.length === 0 ? (
-                <div className="col-span-2 rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
-                  No domains currently exceed the {templateConfig.strongThreshold || CONFIG_STRONG_THRESHOLD}% strong threshold. Targeted
-                  practice will help build your first mastery domain.
-                </div>
-              ) : (
-                domainPerf.strongDomains.map((domain) => (
-                  <DomainCard key={domain.domainId} domain={domain} type="strong" />
-                ))
-              )}
-            </div>
-          </section>
-        )}
-
-        {/* Weak Domains Section */}
-        {templateConfig.showWeakDomains !== false && (
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-rose-100 text-rose-700 text-xs font-bold">
-                    !
-                  </span>
-                  <h2 className="text-lg font-semibold text-slate-900">Weak Domains (Focus Areas)</h2>
-                </div>
-                <p className="mt-0.5 text-xs sm:text-sm text-slate-500">
-                  Taxonomy areas needing prioritized reinforcement (accuracy &lt; {templateConfig.moderateThreshold || CONFIG_MODERATE_THRESHOLD}%)
-                </p>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                {section.items.length === 0 ? (
+                  <div className="col-span-2 rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+                    {section.emptyMessage}
+                  </div>
+                ) : (
+                  section.items.map((domain) => (
+                    <DomainCard
+                      key={domain.domainId}
+                      domain={domain}
+                      type={section.tone === 'rose' ? 'weak' : section.tone === 'amber' ? 'moderate' : 'strong'}
+                      visibleFields={templateConfig.sectionFields?.[section.sectionId]}
+                    />
+                  ))
+                )}
               </div>
-              <span className="rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-800">
-                {domainPerf.weakDomains.length}{' '}
-                {domainPerf.weakDomains.length === 1 ? 'Focus Area' : 'Focus Areas'}
-              </span>
-            </div>
-
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              {domainPerf.weakDomains.length === 0 ? (
-                <div className="col-span-2 rounded-xl border border-emerald-100 bg-emerald-50/40 p-6 text-center text-sm text-emerald-800">
-                  Excellent baseline! No domains scored below the {templateConfig.moderateThreshold || CONFIG_MODERATE_THRESHOLD}% threshold.
-                </div>
-              ) : (
-                domainPerf.weakDomains.map((domain) => (
-                  <DomainCard key={domain.domainId} domain={domain} type="weak" />
-                ))
-              )}
-            </div>
-          </section>
-        )}
+            </section>
+          )
+        })}
 
         {/* Time Analysis Section */}
-        {templateConfig.showTimeAnalysis !== false && (
+        {shouldShowSection('showTimeAnalysis') && (
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <TimeAnalysisSection timeAnalysis={timeAnalysis} />
+            <TimeAnalysisSection
+              timeAnalysis={timeAnalysis}
+              visibleFields={templateConfig.sectionFields?.showTimeAnalysis}
+            />
           </section>
         )}
 
         {/* Taxonomy Hierarchy Tree */}
-        {templateConfig.showTaxonomyTree !== false && (
+        {shouldShowSection('showTaxonomyTree') && (
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle
               title="Taxonomy & Curriculum Breakdown"
               subtitle="Explore your curriculum hierarchy — tap any category or skill to filter corresponding questions"
             />
             <div className="mt-4">
-              <TaxonomyTree breakdowns={breakdowns} onSelect={handleSelectTaxonomy} activeFilter={filter} />
+              <TaxonomyTree
+                breakdowns={displayedBreakdowns}
+                visibleFields={templateConfig.sectionFields?.showTaxonomyTree}
+                onSelect={handleSelectTaxonomy}
+                activeFilter={filter}
+              />
             </div>
           </section>
         )}
 
         {/* Diagnostic Behavior & Mistake Types */}
-        {templateConfig.showErrorPatterns !== false && (
+        {shouldShowSection('showErrorPatterns') && (
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle
               title="Error Pattern Diagnosis"
               subtitle="Distinguishing conceptual gaps from pacing and careless errors"
             />
             <div className="mt-4 flex flex-wrap gap-3">
-              <ErrorChip
+              {isSectionFieldVisible('showErrorPatterns', 'conceptual') && <ErrorChip
                 label="Conceptual Gaps"
                 count={analytics.conceptualErrors}
                 tone="bg-rose-100 text-rose-700"
-              />
-              <ErrorChip
+              />}
+              {isSectionFieldVisible('showErrorPatterns', 'rushed') && <ErrorChip
                 label="Rushed Mistakes (<25s)"
                 count={overall.rushed_mistakes_count}
                 tone="bg-amber-100 text-amber-700"
-              />
-              <ErrorChip
+              />}
+              {isSectionFieldVisible('showErrorPatterns', 'timesink') && <ErrorChip
                 label="Timesink Mistakes (>100s)"
                 count={overall.timesink_mistakes_count}
                 tone="bg-sky-100 text-sky-700"
-              />
+              />}
             </div>
-            <p className="mt-3 text-sm text-slate-600">
+            {isSectionFieldVisible('showErrorPatterns', 'summary') && <p className="mt-3 text-sm text-slate-600">
               Of {overall.incorrect_count} incorrect answers, {analytics.conceptualErrors} reflect
               conceptual difficulty, {overall.rushed_mistakes_count} were rushed carelessly, and{' '}
               {overall.timesink_mistakes_count} were lost to overthinking past 100 seconds.
-            </p>
+            </p>}
           </section>
         )}
 
         {/* Question-by-Question Detailed Review */}
-        {templateConfig.showQuestionSolutions !== false && (
+        {shouldShowSection('showQuestionSolutions') && (
           <section
             ref={questionsRef}
             className="scroll-mt-24 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
@@ -764,6 +907,7 @@ export default function ReportPage() {
                     index={questions.indexOf(q)}
                     avgTime={avgTime}
                     highlight={!!filter}
+                    visibleFields={templateConfig.sectionFields?.showQuestionSolutions}
                   />
                 ))
               )}
@@ -772,7 +916,7 @@ export default function ReportPage() {
         )}
 
         {/* Personalized Student Action Roadmap Section */}
-        {templateConfig.showActionPlan !== false && matchedActionPlan && (
+        {shouldShowSection('showActionPlan') && matchedActionPlan && (
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
               <div>
@@ -786,22 +930,24 @@ export default function ReportPage() {
                   Phased improvement roadmap calibrated to your diagnostic test score and reflection
                 </p>
               </div>
-              <span className="self-start sm:self-auto rounded-full bg-blue-50 border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-800">
+              {isSectionFieldVisible('showActionPlan', 'audience') && <span className="self-start sm:self-auto rounded-full bg-blue-50 border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-800">
                 {matchedActionPlan.target_audience || 'Personalized Track'}
-              </span>
+              </span>}
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                <h3 className="text-base font-bold text-slate-900">{matchedActionPlan.title}</h3>
-                <span className="text-xs font-semibold text-blue-600">{matchedActionPlan.tagline}</span>
-              </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
+              {isSectionFieldVisible('showActionPlan', 'title') && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <h3 className="text-base font-bold text-slate-900">{matchedActionPlan.title}</h3>
+                  <span className="text-xs font-semibold text-blue-600">{matchedActionPlan.tagline}</span>
+                </div>
+              )}
+              {isSectionFieldVisible('showActionPlan', 'summary') && <p className="text-xs text-slate-600 leading-relaxed">
                 {matchedActionPlan.summary}
-              </p>
+              </p>}
 
               {/* Milestones */}
-              {matchedActionPlan.milestones?.length > 0 && (
+              {isSectionFieldVisible('showActionPlan', 'milestones') && matchedActionPlan.milestones?.length > 0 && (
                 <div className="pt-3 border-t border-slate-200/80 space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
                     Phased Milestone Progression
@@ -840,7 +986,7 @@ export default function ReportPage() {
               )}
 
               {/* Weekly Routine */}
-              {matchedActionPlan.weekly_routine?.length > 0 && (
+              {isSectionFieldVisible('showActionPlan', 'routine') && matchedActionPlan.weekly_routine?.length > 0 && (
                 <div className="pt-3 border-t border-slate-200/80 space-y-1.5">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
                     Recommended Study Rhythm
@@ -861,7 +1007,7 @@ export default function ReportPage() {
               )}
 
               {/* Key Advice */}
-              {matchedActionPlan.prescriptive_advice?.length > 0 && (
+              {isSectionFieldVisible('showActionPlan', 'advice') && matchedActionPlan.prescriptive_advice?.length > 0 && (
                 <div className="pt-3 border-t border-slate-200/80">
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 text-xs text-slate-700 flex items-start gap-2">
                     <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
@@ -881,26 +1027,28 @@ export default function ReportPage() {
         )}
 
         {/* Actionable Recommendations & Courses */}
-        {templateConfig.showCourseRecommendations !== false && (
+        {shouldShowSection('showCourseRecommendations') && (
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle
               title="Prescriptive Study Recommendations"
               subtitle="Tailored next steps based on your diagnostic results"
             />
-            <p className="mt-2 text-sm text-slate-700 leading-relaxed">
+            {isSectionFieldVisible('showCourseRecommendations', 'recommendation') && <p className="mt-2 text-sm text-slate-700 leading-relaxed">
               {analytics.rubricTier?.recommendation ||
                 overall.level?.recommendation ||
                 'Continue with the structured curriculum pathway, focusing primarily on the identified weak domains.'}
-            </p>
+            </p>}
             {courses.length > 0 && (
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 {courses.map((c: CourseItem) => (
                   <div key={c.id} className="rounded-xl border border-slate-200 p-4 bg-slate-50/50">
-                    <div className="font-semibold text-slate-900">{c.name}</div>
-                    <p className="mt-1 text-sm text-slate-600">
+                    {isSectionFieldVisible('showCourseRecommendations', 'courseName') && (
+                      <div className="font-semibold text-slate-900">{c.name}</div>
+                    )}
+                    {isSectionFieldVisible('showCourseRecommendations', 'description') && <p className="mt-1 text-sm text-slate-600">
                       {c.description || 'Recommended remediation and practice course.'}
-                    </p>
-                    {c.registration_url && (
+                    </p>}
+                    {isSectionFieldVisible('showCourseRecommendations', 'enrollmentLink') && c.registration_url && (
                       <a
                         href={c.registration_url}
                         target="_blank"

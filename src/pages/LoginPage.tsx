@@ -23,10 +23,7 @@ export default function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
-    defaultValues: {
-      email: 'admin@mathplatform.edu',
-      password: 'password123',
-    },
+    defaultValues: { email: '', password: '' },
   })
 
   async function onSubmit(data: LoginFormData) {

@@ -7,6 +7,7 @@ import type {
   TimeAnalysisResult,
   BreakdownRow,
 } from '../components/Reports/Types'
+import type { DomainRubricCopyConfig } from './reportTemplateService'
 
 export type {
   ReportData,
@@ -34,23 +35,47 @@ export function generateDomainExplanation(
   classification: DomainClassification,
   correct: number,
   total: number,
-  avgTimeSec: number
-): { fact: string; insight: string } {
-  let fact = ''
-  let insight = ''
-
-  if (classification === 'Strong') {
-    fact = `Scored ${accuracyPct}% in ${domainName}, above the ${STRONG_DOMAIN_THRESHOLD}% strong threshold (${correct} of ${total} correct, averaging ${avgTimeSec}s per question).`
-    insight = `Continue with advanced practice and timed challenge sets in this area to maintain mastery and pacing.`
-  } else if (classification === 'Moderate') {
-    fact = `Scored ${accuracyPct}% in ${domainName}, in the moderate proficiency band (${correct} of ${total} correct).`
-    insight = `Target intermediate problem sets and review missed questions to build the consistency required for mastery.`
-  } else {
-    fact = `Scored ${accuracyPct}% in ${domainName}, falling below the ${MODERATE_DOMAIN_THRESHOLD}% benchmark (${correct} of ${total} correct, averaging ${avgTimeSec}s per question).`
-    insight = `Recommend targeted foundational review and guided drill sets in ${domainName} before progressing to related higher-level topics.`
+  avgTimeSec: number,
+  strongThreshold = STRONG_DOMAIN_THRESHOLD,
+  moderateThreshold = MODERATE_DOMAIN_THRESHOLD,
+  rubricCopy?: DomainRubricCopyConfig
+): { criterion: string; fact: string; insight: string } {
+  const key = classification.toLowerCase() as 'strong' | 'moderate' | 'weak'
+  const defaults = {
+    strong: {
+      criterion: 'Category accuracy is at least {strongThreshold}%.',
+      explanation: '{category} scored {accuracy}% ({correct} of {total} correct), meeting the configured mastery threshold.',
+      recommendation: 'Continue with advanced practice and timed challenge sets in this area.',
+    },
+    moderate: {
+      criterion: 'Category accuracy is at least {moderateThreshold}% and below {strongThreshold}%.',
+      explanation: '{category} scored {accuracy}% ({correct} of {total} correct), placing it in the developing band.',
+      recommendation: 'Review missed questions and practice this category to build consistency.',
+    },
+    weak: {
+      criterion: 'Category accuracy is below {moderateThreshold}%.',
+      explanation: '{category} scored {accuracy}% ({correct} of {total} correct), below the configured benchmark.',
+      recommendation: 'Revisit foundational concepts in this category and complete guided practice before advancing.',
+    },
   }
+  const configuredCopy = rubricCopy?.[key] || defaults[key]
+  const values: Record<string, string> = {
+    category: domainName,
+    accuracy: String(accuracyPct),
+    correct: String(correct),
+    total: String(total),
+    avgTime: String(avgTimeSec),
+    strongThreshold: String(strongThreshold),
+    moderateThreshold: String(moderateThreshold),
+  }
+  const render = (text: string, fallback: string) =>
+    (text.trim() || fallback).replace(/\{(\w+)\}/g, (match, token: string) => values[token] ?? match)
 
-  return { fact, insight }
+  return {
+    criterion: render(configuredCopy.criterion, defaults[key].criterion),
+    fact: render(configuredCopy.explanation, defaults[key].explanation),
+    insight: render(configuredCopy.recommendation, defaults[key].recommendation),
+  }
 }
 
 /**
@@ -59,7 +84,8 @@ export function generateDomainExplanation(
 export function computeDomainPerformance(
   report: ReportData,
   strongThreshold = STRONG_DOMAIN_THRESHOLD,
-  moderateThreshold = MODERATE_DOMAIN_THRESHOLD
+  moderateThreshold = MODERATE_DOMAIN_THRESHOLD,
+  rubricCopy?: DomainRubricCopyConfig
 ): {
   strongDomains: DomainPerformance[]
   weakDomains: DomainPerformance[]
@@ -143,13 +169,16 @@ export function computeDomainPerformance(
       classification = 'Moderate'
     }
 
-    const { fact, insight } = generateDomainExplanation(
+    const { criterion, fact, insight } = generateDomainExplanation(
       item.domainName,
       accuracyPct,
       classification,
       item.correct,
       item.total,
-      avgTimeSec
+      avgTimeSec,
+      strongThreshold,
+      moderateThreshold,
+      rubricCopy
     )
 
     allDomains.push({
@@ -162,6 +191,7 @@ export function computeDomainPerformance(
       accuracyPct,
       avgTimeSec,
       classification,
+      classificationCriteria: criterion,
       performanceFact: fact,
       actionableInsight: insight,
     })

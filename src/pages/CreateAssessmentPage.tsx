@@ -8,6 +8,7 @@ import {
   type AssessmentSection,
 } from '../lib/assessmentService'
 import { questionBankService } from '../lib/questionBankService'
+import { useUnsavedChanges } from '../contexts/UnsavedChangesContext'
 import {
   ArrowLeft,
   Save,
@@ -36,9 +37,8 @@ export const CreateAssessmentPage: React.FC = () => {
   const [passcodeEnabled, setPasscodeEnabled] = useState(false)
   const [passcode, setPasscode] = useState('1234')
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!title.trim()) return
+  const persistAssessment = () => {
+    if (!title.trim()) throw new Error('Enter an assessment title before saving.')
 
     const bankQuestions = questionBankService.getStoredQuestions()
     const q1 = bankQuestions[0]
@@ -242,6 +242,34 @@ export const CreateAssessmentPage: React.FC = () => {
       sections: initialSections,
     })
 
+    return created
+  }
+
+  const saveBeforeNavigation = () => {
+    persistAssessment()
+    markClean()
+  }
+
+  const hasUnsavedChanges =
+    title.trim() !== '' ||
+    subtitle.trim() !== '' ||
+    subject !== 'Mathematics' ||
+    grade !== 'Grade 10' ||
+    description.trim() !== '' ||
+    instructions !== 'Please complete each question thoughtfully. Check your answers before moving forward.' ||
+    timerMode !== 'per_section' ||
+    attempts !== 1 ||
+    customSectionCount !== 2 ||
+    passcodeEnabled ||
+    passcode !== '1234' ||
+    preset !== 'standard'
+  const markClean = useUnsavedChanges(hasUnsavedChanges, saveBeforeNavigation)
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!title.trim()) return
+    const created = persistAssessment()
+    markClean()
     navigate(`/admin/assessments/${created.id}`)
   }
 
