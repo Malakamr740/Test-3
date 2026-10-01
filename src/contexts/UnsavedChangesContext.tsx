@@ -11,19 +11,22 @@ interface UnsavedChangesContextValue {
   register: (registration: UnsavedChangesRegistration) => void
   clear: (id: string) => void
   markClean: (id: string) => void
+  suppress: () => void
 }
 
 const UnsavedChangesContext = createContext<UnsavedChangesContextValue>({
   register: () => {},
   clear: () => {},
   markClean: () => {},
+  suppress: () => {},
 })
 
 export function UnsavedChangesProvider({ children }: { children: React.ReactNode }) {
   const [registration, setRegistration] = useState<UnsavedChangesRegistration | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const blocker = useBlocker(Boolean(registration?.isDirty))
+  const [suppressing, setSuppressing] = useState(false)
+  const blocker = useBlocker(Boolean(registration?.isDirty && !suppressing))
 
   useBeforeUnload(
     useCallback((event) => {
@@ -51,8 +54,19 @@ export function UnsavedChangesProvider({ children }: { children: React.ReactNode
   }, [])
 
   const markClean = useCallback((id: string) => {
-    setRegistration((current) => current?.id === id ? { ...current, isDirty: false } : current)
+    setRegistration((current) => current?.id === id ? null : current)
   }, [])
+
+  const suppress = useCallback(() => {
+    setSuppressing(true)
+    setRegistration(null)
+  }, [])
+
+  useEffect(() => {
+    if (!suppressing) return
+    blocker.reset?.()
+    setSuppressing(false)
+  }, [suppressing, blocker])
 
   const handleDiscard = () => {
     setRegistration(null)
@@ -71,6 +85,7 @@ export function UnsavedChangesProvider({ children }: { children: React.ReactNode
     setSaveError(null)
     try {
       await registration.onSave()
+      markClean(registration.id)
       setRegistration(null)
       blocker.proceed?.()
     } catch (error) {
@@ -81,7 +96,7 @@ export function UnsavedChangesProvider({ children }: { children: React.ReactNode
   }
 
   return (
-    <UnsavedChangesContext.Provider value={{ register, clear, markClean }}>
+    <UnsavedChangesContext.Provider value={{ register, clear, markClean, suppress }}>
       {children}
       {blocker.state === 'blocked' && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/50 p-4" role="presentation">
@@ -133,7 +148,7 @@ export function UnsavedChangesProvider({ children }: { children: React.ReactNode
 
 export function useUnsavedChanges(isDirty: boolean, onSave?: () => void | Promise<void>) {
   const id = useId()
-  const { register, clear, markClean } = useContext(UnsavedChangesContext)
+  const { register, clear, markClean, suppress } = useContext(UnsavedChangesContext)
   const onSaveRef = useRef(onSave)
   onSaveRef.current = onSave
   const invokeSave = useCallback(() => onSaveRef.current?.(), [])
@@ -144,8 +159,9 @@ export function useUnsavedChanges(isDirty: boolean, onSave?: () => void | Promis
   }, [id, isDirty, invokeSave, register, clear])
 
   return useCallback(() => {
+    suppress()
     markClean(id)
-  }, [id, markClean])
+  }, [id, markClean, suppress])
 }
 
 export default UnsavedChangesContext

@@ -335,6 +335,7 @@ export default function OrganizationSettingsPage() {
     setSavingField(false)
     setModalMode(null)
     setHasUnsavedChanges(false)
+    markClean()
     return true
   }
 
@@ -424,6 +425,7 @@ export default function OrganizationSettingsPage() {
 
     setSavingSettings(false)
     setHasUnsavedChanges(false)
+    markClean()
     setSettingsSavedMessage(true)
     setTimeout(() => setSettingsSavedMessage(false), 2500)
   }
@@ -438,7 +440,7 @@ export default function OrganizationSettingsPage() {
       await handleSaveBranding({ preventDefault } as React.FormEvent)
     }
   }
-  useUnsavedChanges(hasUnsavedChanges, savePendingChanges)
+  const markClean = useUnsavedChanges(hasUnsavedChanges, savePendingChanges)
 
   return (
     <AdminLayout

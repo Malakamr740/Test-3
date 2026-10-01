@@ -111,6 +111,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
     setIsQuestionModalOpen(false)
     setEditingQuestion(null)
     setQuestionBaseline(null)
+    markDraftClean()
     return true
   }
 
@@ -166,6 +167,7 @@ export const SurveyActionPlanAdminPage: React.FC = () => {
     setIsPlanModalOpen(false)
     setEditingPlan(null)
     setPlanBaseline(null)
+    markDraftClean()
     return true
   }
 

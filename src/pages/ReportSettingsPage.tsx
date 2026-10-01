@@ -86,6 +86,7 @@ export const ReportSettingsPage: React.FC = () => {
       template
     )
     setSavedTemplate(template)
+    markClean()
     setSaveSuccess(
       `Report format and rubrics successfully saved for ${
         selectedAssessmentId === 'global'

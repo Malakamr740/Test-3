@@ -25,6 +25,7 @@ import {
   AlertCircle,
   Calculator,
   Sliders,
+  CheckCircle2,
 } from 'lucide-react'
 
 export const AssessmentsPage: React.FC = () => {

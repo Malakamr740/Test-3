@@ -36,6 +36,7 @@ export const CreateAssessmentPage: React.FC = () => {
   const [customSectionCount, setCustomSectionCount] = useState(2)
   const [passcodeEnabled, setPasscodeEnabled] = useState(false)
   const [passcode, setPasscode] = useState('1234')
+  const [isPersisting, setIsPersisting] = useState(false)
 
   const persistAssessment = () => {
     if (!title.trim()) throw new Error('Enter an assessment title before saving.')
@@ -246,28 +247,32 @@ export const CreateAssessmentPage: React.FC = () => {
   }
 
   const saveBeforeNavigation = () => {
+    setIsPersisting(true)
     persistAssessment()
     markClean()
   }
 
   const hasUnsavedChanges =
-    title.trim() !== '' ||
-    subtitle.trim() !== '' ||
-    subject !== 'Mathematics' ||
-    grade !== 'Grade 10' ||
-    description.trim() !== '' ||
-    instructions !== 'Please complete each question thoughtfully. Check your answers before moving forward.' ||
-    timerMode !== 'per_section' ||
-    attempts !== 1 ||
-    customSectionCount !== 2 ||
-    passcodeEnabled ||
-    passcode !== '1234' ||
-    preset !== 'standard'
+    !isPersisting && (
+      title.trim() !== '' ||
+      subtitle.trim() !== '' ||
+      subject !== 'Mathematics' ||
+      grade !== 'Grade 10' ||
+      description.trim() !== '' ||
+      instructions !== 'Please complete each question thoughtfully. Check your answers before moving forward.' ||
+      timerMode !== 'per_section' ||
+      attempts !== 1 ||
+      customSectionCount !== 2 ||
+      passcodeEnabled ||
+      passcode !== '1234' ||
+      preset !== 'standard'
+    )
   const markClean = useUnsavedChanges(hasUnsavedChanges, saveBeforeNavigation)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim()) return
+    setIsPersisting(true)
     const created = persistAssessment()
     markClean()
     navigate(`/admin/assessments/${created.id}`)

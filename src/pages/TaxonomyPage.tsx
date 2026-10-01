@@ -457,6 +457,7 @@ export const TaxonomyPage: React.FC = () => {
 
     setModalMode(null)
     setHasTaxonomyDraftChanges(false)
+    markTaxonomyClean()
     refreshData()
     return true
   }
@@ -471,7 +472,7 @@ export const TaxonomyPage: React.FC = () => {
   const saveTaxonomyBeforeNavigation = () => {
     if (!persistTaxonomyModal()) throw new Error('Enter a name before saving this taxonomy item.')
   }
-  useUnsavedChanges(hasTaxonomyDraftChanges, saveTaxonomyBeforeNavigation)
+  const markTaxonomyClean = useUnsavedChanges(hasTaxonomyDraftChanges, saveTaxonomyBeforeNavigation)
 
   const closeTaxonomyModal = () => {
     setModalMode(null)
